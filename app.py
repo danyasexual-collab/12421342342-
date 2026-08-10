@@ -6,7 +6,6 @@ from authlib.integrations.flask_client import OAuth
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "gibdd_rf_secret_key_super_secure")
 
-# Безопасная инициализация OAuth (не упадет, если ключи не заданы)
 oauth = OAuth(app)
 google_client_id = os.environ.get('GOOGLE_CLIENT_ID')
 google_client_secret = os.environ.get('GOOGLE_CLIENT_SECRET')
@@ -24,7 +23,6 @@ if google_client_id and google_client_secret:
 else:
     google = None
 
-# Vercel имеет доступ к файловой системе только для чтения, кроме /tmp
 DB_PATH = "/tmp/gibdd.db" if os.environ.get("VERCEL") else "gibdd.db"
 
 def init_db():
@@ -76,7 +74,7 @@ def init_db():
             ("А777АА 77", "Государственный фонд", 1, 500000),
             ("В001ОР 99", "Государственный фонд", 1, 350000),
             ("М333ММ 777", "Государственный фонд", 1, 400000),
-            ("К123ОР 50", "Государственный фонд", 0, 50000),
+            ("К123ОР 50", "Государственный фонд", 0, 50050),
             ("Х456ТТ 78", "Государственный фонд", 0, 45000),
         ]
         cursor.executemany("INSERT INTO plates (plate_number, owner_ic, is_special, price, status) VALUES (?, ?, ?, ?, 'Свободен')", sample_plates)
@@ -444,7 +442,7 @@ def get_current_user_data():
         return None
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT id, google_email, google_name, roblx_nick if 0 else roblox_nick, ic_name, age, job, registered FROM users WHERE google_email=?", (session['user'],))
+    cursor.execute("SELECT id, google_email, google_name, roblox_nick, ic_name, age, job, registered FROM users WHERE google_email=?", (session['user'],))
     row = cursor.fetchone()
     if row and row[7] == 1:
         session['registered'] = True
