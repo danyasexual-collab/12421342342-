@@ -1,28 +1,15 @@
 import os
 import sqlite3
+import requests
 from flask import Flask, render_template_string, request, redirect, url_for, session
-from authlib.integrations.flask_client import OAuth
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "gibdd_rf_secret_key_super_secure")
 
-oauth = OAuth(app)
-google_client_id = os.environ.get('GOOGLE_CLIENT_ID')
-google_client_secret = os.environ.get('GOOGLE_CLIENT_SECRET')
+GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID')
+GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET')
 
-if google_client_id and google_client_secret:
-    google = oauth.register(
-        name='google',
-        client_id=google_client_id,
-        client_secret=google_client_secret,
-        server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
-        client_kwargs={
-            'scope': 'openid email profile'
-        }
-    )
-else:
-    google = None
-
+# Vercel имеет доступ к файловой системе только для чтения, кроме /tmp
 DB_PATH = "/tmp/gibdd.db" if os.environ.get("VERCEL") else "gibdd.db"
 
 def init_db():
@@ -74,7 +61,7 @@ def init_db():
             ("А777АА 77", "Государственный фонд", 1, 500000),
             ("В001ОР 99", "Государственный фонд", 1, 350000),
             ("М333ММ 777", "Государственный фонд", 1, 400000),
-            ("К123ОР 50", "Государственный фонд", 0, 50050),
+            ("К123ОР 50", "Государственный фонд", 0, 50000),
             ("Х456ТТ 78", "Государственный фонд", 0, 45000),
         ]
         cursor.executemany("INSERT INTO plates (plate_number, owner_ic, is_special, price, status) VALUES (?, ?, ?, ?, 'Свободен')", sample_plates)
@@ -86,7 +73,10 @@ def init_db():
     conn.commit()
     conn.close()
 
-init_db()
+try:
+    init_db()
+except Exception as e:
+    print(f"DB Init Error: {e}")
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -291,19 +281,40 @@ def index():
 
 @app.route("/login-google")
 def login_google():
-    if not google:
-        return render_template_string(HTML_TEMPLATE, active="home", user_data=None, error_message="Ошибка: Не настроены переменные окружения GOOGLE_CLIENT_ID и GOOGLE_CLIENT_SECRET в панели Vercel.")
+    if not GOOGLE_CLIENT_ID:
+        return render_template_string(HTML_TEMPLATE, active="home", user_data=None, error_message="Ошибка: Не задан GOOGLE_CLIENT_ID в переменных окружения Vercel.")
     redirect_uri = url_for('authorize', _external=True)
-    return google.authorize_redirect(redirect_uri)
+    google_auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?client_id={GOOGLE_CLIENT_ID}&redirect_uri={redirect_uri}&response_type=code&scope=openid%20email%20profile"
+    return redirect(google_auth_url)
 
 @app.route("/authorize")
 def authorize():
-    if not google:
+    code = request.args.get('code')
+    if not code:
         return redirect(url_for('index'))
-    token = google.authorize_access_token()
-    resp = google.get('https://www.googleapis.com/oauth2/v3/userinfo')
-    user_info = resp.json()
     
+    redirect_uri = url_for('authorize', _external=True)
+    token_url = "https://oauth2.googleapis.com/token"
+    data = {
+        "code": code,
+        "client_id": GOOGLE_CLIENT_ID,
+        "client_secret": GOOGLE_CLIENT_SECRET,
+        "redirect_uri": redirect_uri,
+        "grant_type": "authorization_code"
+    }
+    
+    token_res = requests.post(token_url, data=data)
+    if token_res.status_code != 200:
+        return redirect(url_for('index'))
+    
+    token_data = token_res.json()
+    access_token = token_data.get("access_token")
+    
+    user_res = requests.get("https://www.googleapis.com/oauth2/v3/userinfo", headers={"Authorization": f"Bearer {access_token}"})
+    if user_res.status_code != 200:
+        return redirect(url_for('index'))
+        
+    user_info = user_res.json()
     email = user_info.get('email')
     name = user_info.get('name')
     
