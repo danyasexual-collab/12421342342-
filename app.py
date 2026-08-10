@@ -42,15 +42,8 @@ def init_db():
             ic_name TEXT,
             amount INTEGER,
             reason TEXT,
-            status TEXT DEFAULT 'Не оплачен'
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS wanted (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ic_name TEXT,
-            reason TEXT,
-            level TEXT
+            status TEXT DEFAULT 'Не оплачен',
+            is_public INTEGER DEFAULT 0
         )
     ''')
     cursor.execute('''
@@ -82,10 +75,14 @@ def init_db():
             ("Х456ТТ 78", "Государственный фонд", 0, 45000),
         ]
         cursor.executemany("INSERT INTO plates (plate_number, owner_ic, is_special, price, status) VALUES (?, ?, ?, ?, 'Свободен')", sample_plates)
-    
-    cursor.execute("SELECT COUNT(*) FROM wanted")
+        
+    cursor.execute("SELECT COUNT(*) FROM fines")
     if cursor.fetchone()[0] == 0:
-        cursor.execute("INSERT INTO wanted (ic_name, reason, level) VALUES (?, ?, ?)", ("Иван Иванов", "Угон патрульного авто ФГУП", "Высокий"))
+        sample_fines = [
+            ("Система", 15000, "Массовое превышение скоростного режима на мосту (Публичный)", "Не оплачен", 1),
+            ("Система", 50000, "Отказ от остановки по требованию сотрудников ДПС (Публичный)", "В розыске", 1),
+        ]
+        cursor.executemany("INSERT INTO fines (ic_name, amount, reason, status, is_public) VALUES (?, ?, ?, ?, ?)", sample_fines)
 
     conn.commit()
     conn.close()
@@ -105,7 +102,6 @@ HTML_TEMPLATE = """
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-900 text-gray-200 min-h-screen flex flex-col font-sans">
-    <!-- Шапка (Строгий официальный стиль) -->
     <header class="bg-gray-950 border-b border-gray-800 sticky top-0 z-50">
         <div class="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
             <div class="flex items-center space-x-3">
@@ -130,7 +126,6 @@ HTML_TEMPLATE = """
 
     <div class="max-w-7xl mx-auto px-4 py-6 w-full grid grid-cols-1 md:grid-cols-4 gap-6 flex-grow relative">
         
-        <!-- Боковое меню (Строгое, без свечений) -->
         <aside id="sidebar" class="fixed md:static inset-y-0 left-0 z-40 w-72 md:w-auto bg-gray-950 border-r md:border border-gray-800 rounded-none md:rounded-lg p-4 h-full md:h-fit transform -translate-x-full md:translate-x-0 transition-transform duration-200 flex flex-col">
             <div class="flex justify-between items-center mb-4 md:hidden px-1">
                 <span class="font-bold text-xs text-gray-400 uppercase">Навигация</span>
@@ -140,7 +135,7 @@ HTML_TEMPLATE = """
             <h2 class="text-[11px] uppercase tracking-wider text-gray-500 font-bold mb-2 px-2 hidden md:block">Разделы портала</h2>
             <nav class="space-y-1 overflow-y-auto flex-grow text-sm">
                 <a href="/" class="block px-3 py-2 rounded transition {% if active == 'home' %}bg-gray-800 text-white font-medium border-l-2 border-indigo-500{% else %}hover:bg-gray-900 text-gray-400 hover:text-gray-200{% endif %}">Главная страница</a>
-                <a href="/register-char" class="block px-3 py-2 rounded transition {% if active == 'register' %}bg-gray-800 text-white font-medium border-l-2 border-indigo-500{% else %}hover:bg-gray-900 text-gray-400 hover:text-gray-200{% endif %}">Профиль персонажа</a>
+                <a href="/register-char" class="block px-3 py-2 rounded transition {% if active == 'register' %}bg-gray-800 text-white font-medium border-l-2 border-indigo-500{% else %}hover:bg-gray-900 text-gray-400 hover:text-gray-200{% endif %}">{% if session.get('registered') %}Профиль персонажа{% else %}Регистрация персонажа{% endif %}</a>
                 
                 {% if session.get('registered') %}
                     <div class="pt-3 pb-1 px-2 text-[10px] uppercase font-bold text-gray-600 tracking-wider">Услуги</div>
@@ -149,7 +144,6 @@ HTML_TEMPLATE = """
                     
                     <div class="pt-3 pb-1 px-2 text-[10px] uppercase font-bold text-gray-600 tracking-wider">Контроль и учет</div>
                     <a href="/fines" class="block px-3 py-2 rounded transition {% if active == 'fines' %}bg-gray-800 text-white font-medium border-l-2 border-indigo-500{% else %}hover:bg-gray-900 text-gray-400 hover:text-gray-200{% endif %}">База штрафов</a>
-                    <a href="/wanted" class="block px-3 py-2 rounded transition {% if active == 'wanted' %}bg-gray-800 text-white font-medium border-l-2 border-indigo-500{% else %}hover:bg-gray-900 text-gray-400 hover:text-gray-200{% endif %}">Федеральный розыск</a>
                     <a href="/appeal" class="block px-3 py-2 rounded transition {% if active == 'appeal' %}bg-gray-800 text-white font-medium border-l-2 border-indigo-500{% else %}hover:bg-gray-900 text-gray-400 hover:text-gray-200{% endif %}">Подать обращение</a>
                     <a href="/handbook" class="block px-3 py-2 rounded transition {% if active == 'handbook' %}bg-gray-800 text-white font-medium border-l-2 border-indigo-500{% else %}hover:bg-gray-900 text-gray-400 hover:text-gray-200{% endif %}">Справочник КоАП</a>
                 {% else %}
@@ -162,7 +156,6 @@ HTML_TEMPLATE = """
             </nav>
         </aside>
 
-        <!-- Основная область -->
         <main class="md:col-span-3 bg-gray-950 border border-gray-800 rounded-lg p-6">
             {% if error_message %}
                 <div class="bg-red-950/30 border border-red-900/50 p-3 rounded mb-4 text-red-400 text-sm">
@@ -171,60 +164,129 @@ HTML_TEMPLATE = """
             {% endif %}
 
             {% if active == 'home' %}
-                <h1 class="text-xl font-bold mb-3 text-white">Официальный портал ФГУП «ГИБДД-РФ»</h1>
-                <p class="text-gray-400 text-sm leading-relaxed mb-6">Государственная инспекция безопасности дорожного движения. Единая информационная система учета транспорта, правонарушений и регламентированных услуг.</p>
-                
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6 text-sm">
-                    <div class="bg-gray-900 p-4 rounded border border-gray-800">
-                        <div class="font-semibold text-gray-200 mb-1">Госреестр</div>
-                        <div class="text-xs text-gray-400">Распределение стандартных и номерных знаков категории «Особый учет».</div>
+                <div class="space-y-6">
+                    <div>
+                        <h1 class="text-2xl font-bold mb-2 text-white">Государственная инспекция безопасности дорожного движения</h1>
+                        <p class="text-gray-400 text-sm leading-relaxed">Официальный портал ФГУП «ГИБДД-РФ». Информационная система обеспечения безопасности дорожного движения, регистрации транспортных средств и учета административных правонарушений.</p>
                     </div>
-                    <div class="bg-gray-900 p-4 rounded border border-gray-800">
-                        <div class="font-semibold text-gray-200 mb-1">Штрафы</div>
-                        <div class="text-xs text-gray-400">Автоматическая фиксация и погашение административных взысканий.</div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+                        <div class="bg-gray-900 p-4 rounded border border-gray-800">
+                            <div class="text-indigo-400 font-bold text-lg mb-1">🚗 Госреестр ТС</div>
+                            <div class="text-xs text-gray-400 leading-normal">Подача заявок на постановку транспорта на учет, выдача стандартных и блатных номерных знаков.</div>
+                        </div>
+                        <div class="bg-gray-900 p-4 rounded border border-gray-800">
+                            <div class="text-amber-400 font-bold text-lg mb-1">📜 Штрафы КоАП</div>
+                            <div class="text-xs text-gray-400 leading-normal">Контроль публичных и персональных задолженностей, проверка по базам данных в режиме реального времени.</div>
+                        </div>
+                        <div class="bg-gray-900 p-4 rounded border border-gray-800">
+                            <div class="text-green-400 font-bold text-lg mb-1">⚖️ Приемная</div>
+                            <div class="text-xs text-gray-400 leading-normal">Электронные обращения граждан, обжалование постановлений и связь с руководящим составом.</div>
+                        </div>
                     </div>
-                    <div class="bg-gray-900 p-4 rounded border border-gray-800">
-                        <div class="font-semibold text-gray-200 mb-1">Розыск</div>
-                        <div class="text-xs text-gray-400">База данных транспортных средств и лиц, находящихся в оперативном розыске.</div>
+
+                    <div class="bg-gray-900 border border-gray-800 p-5 rounded-lg space-y-3">
+                        <h2 class="text-sm font-bold text-white uppercase tracking-wider">Последние сводки и новости</h2>
+                        <div class="space-y-2 text-xs text-gray-300">
+                            <div class="p-3 bg-gray-950 rounded border border-gray-800 flex justify-between items-center">
+                                <span>⚡ Обновление регламента регистрации номерных знаков категории «Особый учет».</span>
+                                <span class="text-gray-500">10.08.2026</span>
+                            </div>
+                            <div class="p-3 bg-gray-950 rounded border border-gray-800 flex justify-between items-center">
+                                <span>⚡ Запуск автоматизированной системы фиксации нарушений скоростного режима на трассе М-1.</span>
+                                <span class="text-gray-500">08.08.2026</span>
+                            </div>
+                        </div>
                     </div>
+
+                    {% if not session.get('user') %}
+                        <div class="bg-indigo-950/20 border border-indigo-900/40 p-4 rounded flex items-center justify-between text-sm">
+                            <div>
+                                <div class="font-medium text-gray-200">Требуется авторизация для доступа к услугам</div>
+                                <div class="text-xs text-gray-400 mt-0.5">Войдите через защищенную учетную запись Google.</div>
+                            </div>
+                            <a href="/login-google" class="bg-indigo-700 hover:bg-indigo-600 text-white px-4 py-2 rounded text-xs font-medium transition">Войти в систему</a>
+                        </div>
+                    {% endif %}
                 </div>
 
-                {% if not session.get('user') %}
-                    <div class="bg-gray-900 border border-gray-800 p-4 rounded flex items-center justify-between text-sm">
-                        <div>
-                            <div class="font-medium text-gray-200">Требуется авторизация в системе</div>
-                            <div class="text-xs text-gray-400 mt-0.5">Используйте учетную запись Google для продолжения.</div>
-                        </div>
-                        <a href="/login-google" class="bg-indigo-700 hover:bg-indigo-600 text-white px-4 py-1.5 rounded text-xs font-medium transition">Войти</a>
-                    </div>
-                {% endif %}
-
             {% elif active == 'register' %}
-                <h1 class="text-xl font-bold mb-2 text-white">Регистрация персонажа</h1>
-                <p class="text-xs text-gray-400 mb-6">Укажите достоверные игровые данные для привязки к государственным реестрам.</p>
-                
-                <form method="POST" action="/register-char" class="space-y-4 max-w-lg text-sm">
-                    <div>
-                        <label class="block text-xs uppercase text-gray-500 font-semibold mb-1">Ник в Roblox</label>
-                        <input type="text" name="roblox_nick" value="{{ user_data[3] if user_data else '' }}" required class="w-full bg-gray-900 border border-gray-800 rounded px-3 py-2 text-gray-200 focus:outline-none focus:border-indigo-600">
+                {% if user_data and user_data[7] == 1 %}
+                    <h1 class="text-xl font-bold mb-2 text-white">Профиль персонажа</h1>
+                    <p class="text-xs text-gray-400 mb-6">Данные вашего игрового профиля, зарегистрированные в единой базе ГИБДД.</p>
+                    
+                    <div class="bg-gray-900 border border-gray-800 rounded-lg p-5 max-w-lg space-y-4 text-sm">
+                        <div class="flex justify-between border-b border-gray-800 pb-2">
+                            <span class="text-gray-500 text-xs uppercase font-semibold">Аккаунт Google</span>
+                            <span class="text-gray-200 font-mono text-xs">{{ user_data[1] }}</span>
+                        </div>
+                        <div class="flex justify-between border-b border-gray-800 pb-2">
+                            <span class="text-gray-500 text-xs uppercase font-semibold">Ник в Roblox</span>
+                            <span class="text-white font-bold">{{ user_data[3] }}</span>
+                        </div>
+                        <div class="flex justify-between border-b border-gray-800 pb-2">
+                            <span class="text-gray-500 text-xs uppercase font-semibold">Игровое ФИО (IC)</span>
+                            <span class="text-indigo-400 font-bold">{{ user_data[4] }}</span>
+                        </div>
+                        <div class="flex justify-between border-b border-gray-800 pb-2">
+                            <span class="text-gray-500 text-xs uppercase font-semibold">Возраст</span>
+                            <span class="text-gray-200">{{ user_data[5] }} лет</span>
+                        </div>
+                        <div class="flex justify-between pb-1">
+                            <span class="text-gray-500 text-xs uppercase font-semibold">Место работы</span>
+                            <span class="text-gray-200">{{ user_data[6] }}</span>
+                        </div>
                     </div>
-                    <div>
-                        <label class="block text-xs uppercase text-gray-500 font-semibold mb-1">ФИО IC (Игровое)</label>
-                        <input type="text" name="ic_name" value="{{ user_data[4] if user_data else '' }}" required class="w-full bg-gray-900 border border-gray-800 rounded px-3 py-2 text-gray-200 focus:outline-none focus:border-indigo-600">
+
+                    <div class="mt-6">
+                        <h2 class="text-sm font-bold text-white mb-3">Редактировать данные профиля</h2>
+                        <form method="POST" action="/register-char" class="space-y-4 max-w-lg text-sm">
+                            <div>
+                                <label class="block text-xs uppercase text-gray-500 font-semibold mb-1">Ник в Roblox</label>
+                                <input type="text" name="roblox_nick" value="{{ user_data[3] }}" required class="w-full bg-gray-900 border border-gray-800 rounded px-3 py-2 text-gray-200 focus:outline-none focus:border-indigo-600">
+                            </div>
+                            <div>
+                                <label class="block text-xs uppercase text-gray-500 font-semibold mb-1">ФИО IC (Игровое)</label>
+                                <input type="text" name="ic_name" value="{{ user_data[4] }}" required class="w-full bg-gray-900 border border-gray-800 rounded px-3 py-2 text-gray-200 focus:outline-none focus:border-indigo-600">
+                            </div>
+                            <div>
+                                <label class="block text-xs uppercase text-gray-500 font-semibold mb-1">Возраст</label>
+                                <input type="number" name="age" value="{{ user_data[5] }}" required class="w-full bg-gray-900 border border-gray-800 rounded px-3 py-2 text-gray-200 focus:outline-none focus:border-indigo-600">
+                            </div>
+                            <div>
+                                <label class="block text-xs uppercase text-gray-500 font-semibold mb-1">Место работы</label>
+                                <input type="text" name="job" value="{{ user_data[6] }}" required class="w-full bg-gray-900 border border-gray-800 rounded px-3 py-2 text-gray-200 focus:outline-none focus:border-indigo-600">
+                            </div>
+                            <button type="submit" class="bg-indigo-700 hover:bg-indigo-600 text-white px-4 py-2 rounded text-xs font-medium transition">Обновить данные</button>
+                        </form>
                     </div>
-                    <div>
-                        <label class="block text-xs uppercase text-gray-500 font-semibold mb-1">Возраст</label>
-                        <input type="number" name="age" value="{{ user_data[5] if user_data else '' }}" required class="w-full bg-gray-900 border border-gray-800 rounded px-3 py-2 text-gray-200 focus:outline-none focus:border-indigo-600">
-                    </div>
-                    <div>
-                        <label class="block text-xs uppercase text-gray-500 font-semibold mb-1">Место работы</label>
-                        <input type="text" name="job" value="{{ user_data[6] if user_data else '' }}" required class="w-full bg-gray-900 border border-gray-800 rounded px-3 py-2 text-gray-200 focus:outline-none focus:border-indigo-600">
-                    </div>
-                    <div class="flex space-x-3 pt-2">
-                        <button type="submit" class="bg-indigo-700 hover:bg-indigo-600 text-white px-4 py-2 rounded text-xs font-medium transition">Сохранить данные</button>
-                        <a href="/" class="bg-gray-800 hover:bg-gray-700 text-gray-300 px-4 py-2 rounded text-xs transition flex items-center">Пропустить</a>
-                    </div>
-                </form>
+                {% else %}
+                    <h1 class="text-xl font-bold mb-2 text-white">Регистрация персонажа</h1>
+                    <p class="text-xs text-gray-400 mb-6">Укажите достоверные игровые данные для привязки к государственным реестрам.</p>
+                    
+                    <form method="POST" action="/register-char" class="space-y-4 max-w-lg text-sm">
+                        <div>
+                            <label class="block text-xs uppercase text-gray-500 font-semibold mb-1">Ник в Roblox</label>
+                            <input type="text" name="roblox_nick" value="{{ user_data[3] if user_data else '' }}" required class="w-full bg-gray-900 border border-gray-800 rounded px-3 py-2 text-gray-200 focus:outline-none focus:border-indigo-600">
+                        </div>
+                        <div>
+                            <label class="block text-xs uppercase text-gray-500 font-semibold mb-1">ФИО IC (Игровое)</label>
+                            <input type="text" name="ic_name" value="{{ user_data[4] if user_data else '' }}" required class="w-full bg-gray-900 border border-gray-800 rounded px-3 py-2 text-gray-200 focus:outline-none focus:border-indigo-600">
+                        </div>
+                        <div>
+                            <label class="block text-xs uppercase text-gray-500 font-semibold mb-1">Возраст</label>
+                            <input type="number" name="age" value="{{ user_data[5] if user_data else '' }}" required class="w-full bg-gray-900 border border-gray-800 rounded px-3 py-2 text-gray-200 focus:outline-none focus:border-indigo-600">
+                        </div>
+                        <div>
+                            <label class="block text-xs uppercase text-gray-500 font-semibold mb-1">Место работы</label>
+                            <input type="text" name="job" value="{{ user_data[6] if user_data else '' }}" required class="w-full bg-gray-900 border border-gray-800 rounded px-3 py-2 text-gray-200 focus:outline-none focus:border-indigo-600">
+                        </div>
+                        <div class="flex space-x-3 pt-2">
+                            <button type="submit" class="bg-indigo-700 hover:bg-indigo-600 text-white px-4 py-2 rounded text-xs font-medium transition">Сохранить данные</button>
+                            <a href="/" class="bg-gray-800 hover:bg-gray-700 text-gray-300 px-4 py-2 rounded text-xs transition flex items-center">Пропустить</a>
+                        </div>
+                    </form>
+                {% endif %}
 
             {% elif active == 'plates' %}
                 <h1 class="text-xl font-bold mb-2 text-white">Распределение государственных знаков</h1>
@@ -273,7 +335,16 @@ HTML_TEMPLATE = """
                         <input type="text" name="brand" placeholder="Марка" required class="bg-gray-950 border border-gray-800 rounded px-3 py-2 text-xs text-gray-200 focus:outline-none focus:border-indigo-600">
                         <input type="text" name="model" placeholder="Модель" required class="bg-gray-950 border border-gray-800 rounded px-3 py-2 text-xs text-gray-200 focus:outline-none focus:border-indigo-600">
                     </div>
-                    <input type="text" name="plate_number" placeholder="Гос. номер (например: А777АА 77)" required class="w-full bg-gray-950 border border-gray-800 rounded px-3 py-2 text-xs text-gray-200 focus:outline-none focus:border-indigo-600">
+                    <div>
+                        <label class="block text-[11px] uppercase text-gray-500 font-semibold mb-1">Гос. номер (из имеющихся у вас)</label>
+                        <select name="plate_number" required class="w-full bg-gray-950 border border-gray-800 rounded px-3 py-2 text-xs text-gray-200 focus:outline-none focus:border-indigo-600">
+                            {% for p in available_plates %}
+                                <option value="{{ p[1] }}">{{ p[1] }}</option>
+                            {% else %}
+                                <option value="" disabled selected>Сначала получите номер в разделе «Гос. номера»</option>
+                            {% endfor %}
+                        </select>
+                    </div>
                     <button type="submit" class="bg-indigo-700 hover:bg-indigo-600 text-white px-4 py-1.5 rounded text-xs transition">Зарегистрировать</button>
                 </form>
 
@@ -294,40 +365,51 @@ HTML_TEMPLATE = """
                 <h1 class="text-xl font-bold mb-2 text-white">База штрафов</h1>
                 <p class="text-xs text-gray-400 mb-6">Учет административных правонарушений и задолженностей.</p>
                 
-                <div class="space-y-2 text-sm">
-                    {% for fine in fines %}
-                    <div class="bg-gray-900 border border-gray-800 p-3.5 rounded flex justify-between items-center">
-                        <div>
-                            <div class="font-medium text-gray-200">{{ fine[2] }} ₽ — <span class="text-gray-400">{{ fine[3] }}</span></div>
-                            <div class="text-xs text-gray-500 mt-0.5">Статус: <span class="text-amber-400">{{ fine[4] }}</span></div>
+                <div class="space-y-6 text-sm">
+                    <!-- Публичные штрафы -->
+                    <div class="bg-gray-900 border border-gray-800 p-4 rounded-lg space-y-3">
+                        <div class="flex items-center justify-between border-b border-gray-800 pb-2">
+                            <h2 class="font-bold text-white text-xs uppercase tracking-wider">🌍 Публичные штрафы (Видны всем)</h2>
                         </div>
-                        {% if fine[4] == 'Не оплачен' %}
-                        <form method="POST" action="/pay-fine/{{ fine[0] }}">
-                            <button type="submit" class="bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 px-3 py-1 rounded text-xs transition">Оплатить</button>
-                        </form>
-                        {% else %}
-                        <span class="text-xs text-green-500">Погашено</span>
-                        {% endif %}
+                        <div class="space-y-2">
+                            {% for fine in public_fines %}
+                            <div class="bg-gray-950 border border-gray-800 p-3 rounded flex justify-between items-center">
+                                <div>
+                                    <div class="font-medium text-gray-200">{{ fine[2] }} ₽ — <span class="text-gray-400">{{ fine[3] }}</span></div>
+                                    <div class="text-xs text-gray-500 mt-0.5">Нарушитель: <span class="text-indigo-400">{{ fine[1] }}</span> | Статус: <span class="text-amber-400">{{ fine[4] }}</span></div>
+                                </div>
+                            </div>
+                            {% else %}
+                            <p class="text-xs text-gray-500">Публичные штрафы отсутствуют.</p>
+                            {% endfor %}
+                        </div>
                     </div>
-                    {% else %}
-                    <p class="text-xs text-gray-500">Штрафы и взыскания отсутствуют.</p>
-                    {% endfor %}
-                </div>
 
-            {% elif active == 'wanted' %}
-                <h1 class="text-xl font-bold mb-2 text-white">Федеральный розыск</h1>
-                <p class="text-xs text-gray-400 mb-6">Оперативный перечень лиц и объектов транспортного учета.</p>
-                
-                <div class="space-y-2 text-sm">
-                    {% for person in wanted %}
-                    <div class="bg-gray-900 border border-gray-800 p-3.5 rounded flex justify-between items-center">
-                        <div>
-                            <div class="font-medium text-white">{{ person[1] }}</div>
-                            <div class="text-xs text-gray-400 mt-0.5">Основание: {{ person[2] }}</div>
+                    <!-- Личные штрафы -->
+                    <div class="bg-gray-900 border border-gray-800 p-4 rounded-lg space-y-3">
+                        <div class="flex items-center justify-between border-b border-gray-800 pb-2">
+                            <h2 class="font-bold text-white text-xs uppercase tracking-wider">🔒 Ваши личные штрафы (Приватные)</h2>
                         </div>
-                        <span class="bg-red-950/40 border border-red-900/50 text-red-400 px-2 py-0.5 rounded text-[11px] font-medium uppercase">{{ person[3] }} уровень</span>
+                        <div class="space-y-2">
+                            {% for fine in private_fines %}
+                            <div class="bg-gray-950 border border-gray-800 p-3.5 rounded flex justify-between items-center">
+                                <div>
+                                    <div class="font-medium text-gray-200">{{ fine[2] }} ₽ — <span class="text-gray-400">{{ fine[3] }}</span></div>
+                                    <div class="text-xs text-gray-500 mt-0.5">Статус: <span class="text-amber-400">{{ fine[4] }}</span></div>
+                                </div>
+                                {% if fine[4] == 'Не оплачен' %}
+                                <form method="POST" action="/pay-fine/{{ fine[0] }}">
+                                    <button type="submit" class="bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 px-3 py-1 rounded text-xs transition">Оплатить</button>
+                                </form>
+                                {% else %}
+                                <span class="text-xs text-green-500">Погашено</span>
+                                {% endif %}
+                            </div>
+                            {% else %}
+                            <p class="text-xs text-gray-500">У вас нет неоплаченных личных штрафов.</p>
+                            {% endfor %}
+                        </div>
                     </div>
-                    {% endfor %}
                 </div>
 
             {% elif active == 'appeal' %}
@@ -362,27 +444,61 @@ HTML_TEMPLATE = """
                 </div>
 
             {% elif active == 'handbook' %}
-                <h1 class="text-xl font-bold mb-2 text-white">Справочник КоАП РФ</h1>
-                <p class="text-xs text-gray-400 mb-6">Выдержки из кодекса административных правонарушений в сфере дорожного движения.</p>
+                <h1 class="text-xl font-bold mb-2 text-white">Справочник КоАП РФ и штрафов</h1>
+                <p class="text-xs text-gray-400 mb-6">Полный свод административных правонарушений и мер ответственности в сфере дорожного движения.</p>
                 
-                <div class="space-y-2 text-sm">
-                    <div class="bg-gray-900 p-3.5 rounded border border-gray-800 flex justify-between items-center">
-                        <div>
-                            <span class="font-medium text-white">Статья 12.9 ч.2</span> — Превышение скорости (20-40 км/ч)
+                <div class="space-y-4 text-sm">
+                    <div class="text-xs font-bold uppercase tracking-wider text-indigo-400">Глава 12. Правонарушения в области дорожного движения</div>
+                    
+                    <div class="space-y-2">
+                        <div class="bg-gray-900 p-3 rounded border border-gray-800 flex justify-between items-center">
+                            <div><span class="font-medium text-white">Статья 12.1 ч.1</span> — Управление ТС, не зарегистрированным в установленном порядке</div>
+                            <span class="text-gray-300 font-medium">500 ₽</span>
                         </div>
-                        <span class="text-gray-300 font-medium">500 ₽</span>
-                    </div>
-                    <div class="bg-gray-900 p-3.5 rounded border border-gray-800 flex justify-between items-center">
-                        <div>
-                            <span class="font-medium text-white">Статья 12.15 ч.4</span> — Выезд на полосу встречного движения
+                        <div class="bg-gray-900 p-3 rounded border border-gray-800 flex justify-between items-center">
+                            <div><span class="font-medium text-white">Статья 12.3 ч.2</span> — Управление ТС водителем, не имеющим при себе документов</div>
+                            <span class="text-gray-300 font-medium">500 ₽</span>
                         </div>
-                        <span class="text-gray-300 font-medium">5 000 ₽</span>
-                    </div>
-                    <div class="bg-gray-900 p-3.5 rounded border border-gray-800 flex justify-between items-center">
-                        <div>
-                            <span class="font-medium text-white">Статья 12.8 ч.1</span> — Управление в состоянии опьянения
+                        <div class="bg-gray-900 p-3 rounded border border-gray-800 flex justify-between items-center">
+                            <div><span class="font-medium text-white">Статья 12.5 ч.1</span> — Управление при наличии неисправностей или условий</div>
+                            <span class="text-gray-300 font-medium">500 ₽</span>
                         </div>
-                        <span class="text-gray-300 font-medium">30 000 ₽ + Лишение</span>
+                        <div class="bg-gray-900 p-3 rounded border border-gray-800 flex justify-between items-center">
+                            <div><span class="font-medium text-white">Статья 12.6</span> — Нарушение правил применения ремней безопасности</div>
+                            <span class="text-gray-300 font-medium">1 000 ₽</span>
+                        </div>
+                        <div class="bg-gray-900 p-3 rounded border border-gray-800 flex justify-between items-center">
+                            <div><span class="font-medium text-white">Статья 12.9 ч.2</span> — Превышение скорости (на 20-40 км/ч)</div>
+                            <span class="text-gray-300 font-medium">500 ₽</span>
+                        </div>
+                        <div class="bg-gray-900 p-3 rounded border border-gray-800 flex justify-between items-center">
+                            <div><span class="font-medium text-white">Статья 12.9 ч.3</span> — Превышение скорости (на 40-60 км/ч)</div>
+                            <span class="text-gray-300 font-medium">1 500 ₽</span>
+                        </div>
+                        <div class="bg-gray-900 p-3 rounded border border-gray-800 flex justify-between items-center">
+                            <div><span class="font-medium text-white">Статья 12.9 ч.4</span> — Превышение скорости (на 60+ км/ч)</div>
+                            <span class="text-gray-300 font-medium">2 500 ₽ + Лишение</span>
+                        </div>
+                        <div class="bg-gray-900 p-3 rounded border border-gray-800 flex justify-between items-center">
+                            <div><span class="font-medium text-white">Статья 12.12 ч.1</span> — Проезд на запрещающий сигнал светофора</div>
+                            <span class="text-gray-300 font-medium">1 000 ₽</span>
+                        </div>
+                        <div class="bg-gray-900 p-3 rounded border border-gray-800 flex justify-between items-center">
+                            <div><span class="font-medium text-white">Статья 12.15 ч.4</span> — Выезд на полосу встречного движения</div>
+                            <span class="text-gray-300 font-medium">5 000 ₽</span>
+                        </div>
+                        <div class="bg-gray-900 p-3 rounded border border-gray-800 flex justify-between items-center">
+                            <div><span class="font-medium text-white">Статья 12.16 ч.2</span> — Поворот налево или разворот в нарушение требований</div>
+                            <span class="text-gray-300 font-medium">1 500 ₽</span>
+                        </div>
+                        <div class="bg-gray-900 p-3 rounded border border-gray-800 flex justify-between items-center">
+                            <div><span class="font-medium text-white">Статья 12.25 ч.2</span> — Невыполнение требования об остановке ТС</div>
+                            <span class="text-gray-300 font-medium">800 ₽</span>
+                        </div>
+                        <div class="bg-gray-900 p-3 rounded border border-gray-800 flex justify-between items-center">
+                            <div><span class="font-medium text-white">Статья 12.8 ч.1</span> — Управление ТС в состоянии опьянения</div>
+                            <span class="text-gray-300 font-medium">30 000 ₽ + Лишение</span>
+                        </div>
                     </div>
                 </div>
             {% endif %}
@@ -498,7 +614,7 @@ def register_char():
         conn.close()
         
         session['registered'] = True
-        return redirect(url_for('index'))
+        return redirect(url_for('register_char'))
         
     user_data = get_current_user_data()
     return render_template_string(HTML_TEMPLATE, active="register", user_data=user_data)
@@ -552,9 +668,12 @@ def vehicles():
     
     cursor.execute("SELECT id, owner_ic, brand, model, plate_number FROM vehicles WHERE owner_ic=?", (ic_name,))
     vehicles_list = cursor.fetchall()
+    
+    cursor.execute("SELECT id, plate_number FROM plates WHERE owner_ic=?", (ic_name,))
+    available_plates = cursor.fetchall()
     conn.close()
     
-    return render_template_string(HTML_TEMPLATE, active="vehicles", vehicles=vehicles_list)
+    return render_template_string(HTML_TEMPLATE, active="vehicles", vehicles=vehicles_list, available_plates=available_plates)
 
 @app.route("/fines")
 def fines():
@@ -566,19 +685,23 @@ def fines():
     
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT id, ic_name, amount, reason, status FROM fines WHERE ic_name=?", (ic_name,))
-    fines_list = cursor.fetchall()
     
-    if not fines_list:
-        cursor.execute("INSERT INTO fines (ic_name, amount, reason, status) VALUES (?, ?, ?, ?)", 
-                       (ic_name, 5000, "Превышение скорости на трассе М-1", "Не оплачен"))
+    cursor.execute("SELECT id, ic_name, amount, reason, status, is_public FROM fines WHERE is_public=1")
+    public_fines = cursor.fetchall()
+    
+    cursor.execute("SELECT id, ic_name, amount, reason, status, is_public FROM fines WHERE ic_name=? AND is_public=0", (ic_name,))
+    private_fines = cursor.fetchall()
+    
+    if not private_fines:
+        cursor.execute("INSERT INTO fines (ic_name, amount, reason, status, is_public) VALUES (?, ?, ?, ?, ?)", 
+                       (ic_name, 5000, "Превышение скорости на трассе М-1 (Личный)", "Не оплачен", 0))
         conn.commit()
-        cursor.execute("SELECT id, ic_name, amount, reason, status FROM fines WHERE ic_name=?", (ic_name,))
-        fines_list = cursor.fetchall()
+        cursor.execute("SELECT id, ic_name, amount, reason, status, is_public FROM fines WHERE ic_name=? AND is_public=0", (ic_name,))
+        private_fines = cursor.fetchall()
         
     conn.close()
     
-    return render_template_string(HTML_TEMPLATE, active="fines", fines=fines_list)
+    return render_template_string(HTML_TEMPLATE, active="fines", public_fines=public_fines, private_fines=private_fines)
 
 @app.route("/pay-fine/<int:fine_id>", methods=["POST"])
 def pay_fine(fine_id):
@@ -592,19 +715,6 @@ def pay_fine(fine_id):
     conn.close()
     
     return redirect(url_for('fines'))
-
-@app.route("/wanted")
-def wanted():
-    if not session.get('registered'):
-        return redirect(url_for('register_char'))
-    
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, ic_name, reason, level FROM wanted")
-    wanted_list = cursor.fetchall()
-    conn.close()
-    
-    return render_template_string(HTML_TEMPLATE, active="wanted", wanted=wanted_list)
 
 @app.route("/appeal", methods=["GET", "POST"])
 def appeal():
