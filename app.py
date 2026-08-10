@@ -1,11 +1,24 @@
 import os
 import sqlite3
 from flask import Flask, render_template_string, request, redirect, url_for, session
+from authlib.integrations.flask_client import OAuth
 
 app = Flask(__name__)
-app.secret_key = "gibdd_rf_secret_key_change_me_secure"
+app.secret_key = os.environ.get("SECRET_KEY", "gibdd_rf_secret_key_super_secure")
 
-# Vercel has read-only filesystem except for /tmp
+# Настройка OAuth через Authlib
+oauth = OAuth(app)
+google = oauth.register(
+    name='google',
+    client_id=os.environ.get('GOOGLE_CLIENT_ID'),
+    client_secret=os.environ.get('GOOGLE_CLIENT_SECRET'),
+    server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
+    client_kwargs={
+        'scope': 'openid email profile'
+    }
+)
+
+# Vercel имеет доступ к файловой системе только для чтения, кроме /tmp
 DB_PATH = "/tmp/gibdd.db" if os.environ.get("VERCEL") else "gibdd.db"
 
 def init_db():
@@ -268,14 +281,37 @@ def index():
 
 @app.route("/login-google")
 def login_google():
-    session['user'] = "user_google@gmail.com"
+    redirect_uri = url_for('authorize', _external=True)
+    return google.authorize_redirect(redirect_uri)
+
+@app.route("/authorize")
+def authorize():
+    token = google.authorize_access_token()
+    resp = google.get('https://www.googleapis.com/oauth2/v3/userinfo')
+    user_info = resp.json()
+    
+    email = user_info.get('email')
+    name = user_info.get('name')
+    
+    session['user'] = email
+    
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("INSERT OR IGNORE INTO users (google_email, google_name) VALUES (?, ?)", 
-                   (session['user'], "Google User"))
+    cursor.execute("INSERT OR IGNORE INTO users (google_email, google_name) VALUES (?, ?)", (email, name))
     conn.commit()
+    
+    cursor.execute("SELECT registered FROM users WHERE google_email=?", (email,))
+    row = cursor.fetchone()
+    if row and row[0] == 1:
+        session['registered'] = True
+    else:
+        session.pop('registered', None)
     conn.close()
-    return redirect(url_for('register_char'))
+    
+    if row and row[0] == 1:
+        return redirect(url_for('index'))
+    else:
+        return redirect(url_for('register_char'))
 
 @app.route("/logout")
 def logout():
