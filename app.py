@@ -1,18 +1,18 @@
 import os
 import json
-from flask import Flask, redirect, url_for, session, render_template_string
+from flask import Flask, redirect, url_for, session, render_template_string, request
 from authlib.integrations.flask_client import OAuth
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'gibdd-rf-secret-key-2026')
 
-# Автоматическая обработка HTTPS-заголовков Vercel
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
-# Временное хранилище для Vercel
 DATA_DIR = '/tmp' if os.environ.get('VERCEL') else '.'
 DATA_FILE = os.path.join(DATA_DIR, 'database.json')
+
+OWNER_EMAIL = 'danyasexual@gmail.com'
 
 def load_db():
     if os.path.exists(DATA_FILE):
@@ -31,7 +31,6 @@ def save_db(data):
     except Exception:
         pass
 
-# Настройка OAuth (Google + Discord)
 oauth = OAuth(app)
 
 oauth.register(
@@ -58,88 +57,176 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ФГУП «ГИБДД-РФ» — Портал государственной регистрации</title>
+    <title>ФГУП «ГИБДД-РФ» — Портал управления</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: 'Segoe UI', Arial, sans-serif; background-color: #0b0e14; color: #e0e0e0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
-        .card { background: #131822; border: 1px solid #1f293d; border-radius: 12px; width: 100%; max-width: 750px; padding: 30px; box-shadow: 0 12px 32px rgba(0,0,0,0.6); }
-        .header-flex { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #1f293d; padding-bottom: 15px; }
-        h1 { font-size: 20px; color: #fff; text-transform: uppercase; letter-spacing: 1px; }
-        p.sub { font-size: 12px; color: #8a99ad; }
+        .card { background: #131822; border: 1px solid #1f293d; border-radius: 12px; width: 100%; max-width: 850px; padding: 25px; box-shadow: 0 12px 32px rgba(0,0,0,0.6); }
         
-        .dashboard { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 20px; }
-        .panel { background: #182030; border: 1px solid #243049; border-radius: 8px; padding: 18px; transition: 0.2s; cursor: pointer; }
-        .panel:hover { border-color: #00a2ff; transform: translateY(-2px); }
-        .panel h3 { font-size: 15px; color: #38bdf8; margin-bottom: 6px; }
-        .panel p { font-size: 12px; color: #94a3b8; line-height: 1.4; }
+        .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #1f293d; padding-bottom: 15px; }
+        .brand { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: bold; color: #fff; text-transform: uppercase; }
+        .online-status { font-size: 12px; color: #22c55e; display: flex; align-items: center; gap: 6px; }
+        .online-dot { width: 8px; height: 8px; background-color: #22c55e; border-radius: 50%; box-shadow: 0 0 8px #22c55e; }
+
+        .nav-tabs { display: flex; gap: 8px; margin-bottom: 20px; background: #182030; padding: 8px; border-radius: 8px; border: 1px solid #243049; }
+        .nav-btn { background: #131822; border: 1px solid #243049; color: #94a3b8; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 14px; transition: 0.2s; display: flex; align-items: center; gap: 6px; }
+        .nav-btn:hover, .nav-btn.active { background: #00a2ff; color: #fff; border-color: #00a2ff; }
+
+        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+        .stat-card { background: #182030; border: 1px solid #243049; border-radius: 8px; padding: 15px; text-align: center; }
+        .stat-card h3 { font-size: 22px; color: #fff; margin-bottom: 4px; }
+        .stat-card p { font-size: 12px; color: #94a3b8; text-transform: uppercase; }
+
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
         
-        .user-badge { background: #182030; border-left: 4px solid #38bdf8; padding: 14px; border-radius: 6px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
-        .user-info p { margin: 3px 0; font-size: 13px; color: #cbd5e1; }
-        .user-info b { color: #fff; }
+        .panel { background: #182030; border: 1px solid #243049; border-radius: 8px; padding: 20px; margin-bottom: 15px; }
+        .panel h3 { color: #38bdf8; font-size: 16px; margin-bottom: 12px; }
         
-        .btn { display: block; width: 100%; padding: 12px; margin: 10px 0; border: none; border-radius: 6px; font-size: 14px; font-weight: bold; cursor: pointer; text-decoration: none; color: white; text-align: center; transition: 0.2s; }
+        .verified-badge { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; background: #00a2ff; border-radius: 50%; color: white; font-size: 10px; margin-left: 5px; vertical-align: middle; }
+        .tag { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; margin-right: 5px; text-transform: uppercase; }
+        .tag-admin { background: #ef4444; color: white; }
+        .tag-mod { background: #8b5cf6; color: white; }
+        .tag-user { background: #3b82f6; color: white; }
+
+        .form-group { margin-bottom: 12px; }
+        .form-group label { display: block; font-size: 12px; color: #94a3b8; margin-bottom: 5px; }
+        .form-control { width: 100%; background: #131822; border: 1px solid #243049; padding: 10px; border-radius: 6px; color: #fff; font-size: 14px; }
+        .checkbox-label { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; color: #cbd5e1; }
+
+        .btn { display: block; width: 100%; padding: 12px; border: none; border-radius: 6px; font-size: 14px; font-weight: bold; cursor: pointer; text-decoration: none; color: white; text-align: center; transition: 0.2s; }
+        .btn-primary { background-color: #00a2ff; }
+        .btn-primary:hover { background-color: #008be2; }
         .btn-google { background-color: #ea4335; }
-        .btn-google:hover { background-color: #d33426; }
         .btn-discord { background-color: #5865F2; }
-        .btn-discord:hover { background-color: #4752c4; }
-        .btn-disabled { background-color: #1a2233; color: #55627a; text-decoration: line-through; cursor: not-allowed; pointer-events: none; border: 1px dashed #2a3852; font-size: 13px; }
-        .btn-logout { background-color: #26171a; border: 1px solid #4a2228; color: #f87171; width: auto; padding: 8px 16px; margin: 0; font-size: 12px; }
-        .btn-logout:hover { background-color: #3b1b22; }
-        
-        .footer { margin-top: 20px; font-size: 11px; color: #475569; text-align: center; }
-        .center-box { text-align: center; max-width: 420px; margin: 0 auto; }
+        .btn-disabled { background-color: #1a2233; color: #55627a; text-decoration: line-through; cursor: not-allowed; border: 1px dashed #2a3852; font-size: 13px; }
+        .btn-logout { background-color: #26171a; border: 1px solid #4a2228; color: #f87171; width: auto; padding: 6px 14px; font-size: 12px; }
+
+        .center-box { text-align: center; max-width: 420px; margin: 40px auto; }
+        .footer { margin-top: 20px; font-size: 11px; color: #475569; text-align: center; border-top: 1px solid #1f293d; padding-top: 15px; }
     </style>
 </head>
 <body>
     <div class="card">
         {% if user %}
-            <div class="header-flex">
-                <div>
-                    <h1>ФГУП «ГИБДД-РФ»</h1>
-                    <p class="sub">Государственный реестр и учет транспортных средств</p>
+            <div class="top-bar">
+                <div class="brand">
+                    <span>🚗 ФГУП «ГИБДД-РФ»</span>
                 </div>
-                <a href="/logout" class="btn btn-logout">Выйти</a>
-            </div>
-
-            <div class="user-badge">
-                <div class="user-info">
-                    <p><b>Гражданин / Сотрудник:</b> {{ user.get('name') }}</p>
-                    <p><b>Идентификатор входа:</b> {{ user.get('provider') }}</p>
-                    {% if user.get('email') %}<p><b>Email:</b> {{ user.get('email') }}</p>{% endif %}
+                <div style="display: flex; align-items: center; gap: 15px;">
+                    <div class="online-status">
+                        <div class="online-dot"></div> Онлайн
+                    </div>
+                    <a href="/logout" class="btn btn-logout">Выйти</a>
                 </div>
             </div>
 
-            <div class="dashboard">
+            <div class="nav-tabs">
+                <button class="nav-btn active" onclick="switchTab('tab-main', this)">📊 Главная</button>
+                <button class="nav-btn" onclick="switchTab('tab-cars', this)">🚗 ТС и Номера</button>
+                <button class="nav-btn" onclick="switchTab('tab-users', this)">👥 Пользователи</button>
+                {% if user.get('email') == 'danyasexual@gmail.com' %}
+                <button class="nav-btn" onclick="switchTab('tab-settings', this)">⚙️ Кастомизация</button>
+                {% endif %}
+            </div>
+
+            <div class="stats-grid">
+                <div class="stat-card"><h3>142</h3><p>Номеров</p></div>
+                <div class="stat-card"><h3>38</h3><p>Пользователей</p></div>
+                <div class="stat-card"><h3>5</h3><p>Штрафов</p></div>
+                <div class="stat-card"><h3>0</h3><p>В розыске</p></div>
+            </div>
+
+            <div id="tab-main" class="tab-content active">
                 <div class="panel">
-                    <h3>🚗 Регистрация ТС</h3>
-                    <p>Постановка на учет личного и служебного автотранспорта, выдача свидетельств.</p>
+                    <h3>Профиль сотрудника / игрока</h3>
+                    <p style="font-size: 14px; margin-bottom: 10px;">
+                        <b>Имя:</b> {{ user.get('name') }} 
+                        {% if user.get('verified') %}<span class="verified-badge" title="Верифицированный аккаунт">✓</span>{% endif %}
+                    </p>
+                    <p style="font-size: 13px; color: #94a3b8; margin-bottom: 10px;">
+                        <b>Статус тегов:</b> 
+                        {% if user.get('tags') %}
+                            {% for t in user.get('tags') %}
+                                {% if t == 'Руководство' %}<span class="tag tag-admin">Руководство</span>
+                                {% elif t == 'Модератор' %}<span class="tag tag-mod">Модератор</span>
+                                {% else %}<span class="tag tag-user">{{ t }}</span>{% endif %}
+                            {% endfor %}
+                        {% else %}
+                            <span class="tag tag-user">Гражданин</span>
+                        {% endif %}
+                    </p>
+                    <p style="font-size: 13px; color: #94a3b8;"><b>Авторизация через:</b> {{ user.get('provider') }}</p>
                 </div>
                 <div class="panel">
-                    <h3>💎 Биржа блатных номеров</h3>
-                    <p>Покупка, продажа и аукцион эксклюзивных государственных регистрационных знаков.</p>
-                </div>
-                <div class="panel">
-                    <h3>📋 Учет игроков</h3>
-                    <p>Регистрация профилей сотрудников и граждан в единой базе данных ГИБДД.</p>
-                </div>
-                <div class="panel">
-                    <h3>⚠️ База штрафов и розыска</h3>
-                    <p>Проверка транспортных средств на наличие ограничений, штрафов и ориентировок.</p>
+                    <h3>📋 Последние действия</h3>
+                    <p style="color: #94a3b8; font-size: 13px;">Системный лог пуст. Все операции по выдаче блатных номеров и регистрации фиксируются автоматически.</p>
                 </div>
             </div>
+
+            <div id="tab-cars" class="tab-content">
+                <div class="panel">
+                    <h3>Биржа блатных номеров и ТС</h3>
+                    <p style="color: #94a3b8; font-size: 13px; margin-bottom: 15px;">Управление государственными регистрационными знаками и транспортом.</p>
+                    <button class="btn btn-primary" onclick="alert('Функционал добавления ТС активен!')">+ Зарегистрировать транспорт</button>
+                </div>
+            </div>
+
+            <div id="tab-users" class="tab-content">
+                <div class="panel">
+                    <h3>Реестр игроков и сотрудников</h3>
+                    <p style="color: #94a3b8; font-size: 13px;">Список активных учетных записей в базе данных ГИБДД.</p>
+                </div>
+            </div>
+
+            {% if user.get('email') == 'danyasexual@gmail.com' %}
+            <div id="tab-settings" class="tab-content">
+                <div class="panel">
+                    <h3>Панель кастомизации и верификации (Только для вас)</h3>
+                    <form action="/update_settings" method="POST">
+                        <div class="form-group">
+                            <label>Выбрать должность / тег:</label>
+                            <select name="tag" class="form-control">
+                                <option value="Руководство" {% if 'Руководство' in user.get('tags', []) %}selected{% endif %}>Руководство</option>
+                                <option value="Модератор" {% if 'Модератор' in user.get('tags', []) %}selected{% endif %}>Модератор</option>
+                                <option value="Сотрудник" {% if 'Сотрудник' in user.get('tags', []) %}selected{% endif %}>Сотрудник ДПС</option>
+                                <option value="Гражданин" {% if 'Гражданин' in user.get('tags', []) %}selected{% endif %}>Гражданин</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="verified" value="true" {% if user.get('verified') %}checked{% endif %}>
+                                Верифицировать аккаунт (Синяя галочка ✓)
+                            </label>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Сохранить изменения</button>
+                    </form>
+                </div>
+            </div>
+            {% endif %}
+
         {% else %}
             <div class="center-box">
-                <h1>ФГУП «ГИБДД-РФ»</h1>
-                <p class="sub" style="margin-bottom: 25px;">Единый портал авторизации игроков</p>
-                <p style="margin-bottom: 15px; font-size: 14px; color: #94a3b8;">Выберите способ входа в систему:</p>
-                <a href="/login/google" class="btn btn-google">Войти через Google</a>
-                <a href="/login/discord" class="btn btn-discord">Войти через Discord (Beta)</a>
+                <h1 style="font-size: 20px; color: #fff; margin-bottom: 6px; text-transform: uppercase;">ФГУП «ГИБДД-РФ»</h1>
+                <p style="font-size: 12px; color: #8a99ad; margin-bottom: 25px;">Портал авторизации и доступа к базе данных</p>
+                <p style="margin-bottom: 15px; font-size: 14px; color: #94a3b8;">Авторизуйтесь для доступа:</p>
+                <a href="/login/google" class="btn btn-google" style="margin-bottom: 10px;">Войти через Google</a>
+                <a href="/login/discord" class="btn btn-discord" style="margin-bottom: 10px;">Войти через Discord (Beta)</a>
                 <div class="btn btn-disabled">Войти через Roblox (Временно не работает)</div>
             </div>
         {% endif %}
 
         <div class="footer">ФГУП «ГИБДД-РФ» &copy; 2026. Официальный серверный реестр.</div>
     </div>
+
+    <script>
+        function switchTab(tabId, btn) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
+            document.getElementById(tabId).classList.add('active');
+            btn.classList.add('active');
+        }
+    </script>
 </body>
 </html>
 """
@@ -159,15 +246,24 @@ def auth_google():
         token = oauth.google.authorize_access_token()
         user_info = token.get('userinfo')
         if user_info:
+            sub = user_info.get('sub')
+            email = user_info.get('email')
+            db = load_db()
+            user_key = f"google_{sub}"
+            
+            is_owner = (email == OWNER_EMAIL)
+            existing = db.get(user_key, {})
+            
             user_data = {
                 'name': user_info.get('name'),
-                'email': user_info.get('email'),
+                'email': email,
                 'provider': 'Google',
-                'sub': user_info.get('sub')
+                'sub': sub,
+                'tags': existing.get('tags', ['Руководство'] if is_owner else ['Гражданин']),
+                'verified': existing.get('verified', True if is_owner else False)
             }
             session['user'] = user_data
-            db = load_db()
-            db[f"google_{user_info.get('sub')}"] = user_data
+            db[user_key] = user_data
             save_db(db)
     except Exception as e:
         print(f"Google auth error: {e}")
@@ -185,18 +281,51 @@ def auth_discord():
         resp = oauth.discord.get('users/@me', token=token)
         user_info = resp.json()
         if user_info:
+            sub = user_info.get('id')
+            email = user_info.get('email')
+            db = load_db()
+            user_key = f"discord_{sub}"
+            
+            username = f"{user_info.get('username')}#{user_info.get('discriminator', '0')}" if user_info.get('discriminator') and user_info.get('discriminator') != '0' else user_info.get('username')
+            
+            is_owner = (email == OWNER_EMAIL)
+            existing = db.get(user_key, {})
+            
             user_data = {
-                'name': f"{user_info.get('username')}#{user_info.get('discriminator', '0')}" if user_info.get('discriminator') and user_info.get('discriminator') != '0' else user_info.get('username'),
-                'email': user_info.get('email'),
+                'name': username,
+                'email': email,
                 'provider': 'Discord',
-                'sub': user_info.get('id')
+                'sub': sub,
+                'tags': existing.get('tags', ['Руководство'] if is_owner else ['Гражданин']),
+                'verified': existing.get('verified', True if is_owner else False)
             }
             session['user'] = user_data
-            db = load_db()
-            db[f"discord_{user_info.get('id')}"] = user_data
+            db[user_key] = user_data
             save_db(db)
     except Exception as e:
         print(f"Discord auth error: {e}")
+    return redirect('/')
+
+@app.route('/update_settings', methods=['POST'])
+def update_settings():
+    user = session.get('user')
+    if not user or user.get('email') != OWNER_EMAIL:
+        return redirect('/')
+    
+    selected_tag = request.form.get('tag', 'Руководство')
+    is_verified = True if request.form.get('verified') == 'true' else False
+    
+    user['tags'] = [selected_tag]
+    user['verified'] = is_verified
+    session['user'] = user
+    
+    db = load_db()
+    user_key = f"{user['provider'].lower()}_{user['sub']}"
+    if user_key in db:
+        db[user_key]['tags'] = user['tags']
+        db[user_key]['verified'] = user['verified']
+        save_db(db)
+        
     return redirect('/')
 
 @app.route('/logout')
