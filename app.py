@@ -1,100 +1,67 @@
 import os
-import json
+import sqlite3
 from datetime import datetime
 from flask import Flask, render_template_string, request, jsonify
 
 app = Flask(__name__)
+DB_NAME = "database.db"
 
-# Файлы данных в корне проекта
-DATA_FILE = "data.json"
-WANTED_FILE = "wanted.json"
-HISTORY_FILE = "history.json"
-FINES_FILE = "fines.json"
-AUCTION_FILE = "auction.json"
-LOGS_FILE = "logs.json"
+def get_db():
+    conn = sqlite3.connect(DB_NAME)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 def init_db():
-    if not os.path.exists(DATA_FILE):
-        initial_data = {
-            "user_plates": {
-                "user1": ["А777МР777", "В888УХ77", "К666АА99"],
-                "user2": ["А001МР97", "Х384ТУ777"],
-                "user3": ["МММ777", "РРР999"]
-            }
-        }
-        save_json(DATA_FILE, initial_data)
-
-    if not os.path.exists(WANTED_FILE):
-        initial_wanted = {
-            "А777МР777": "Угон",
-            "К666АА99": "ДТП со скрытием"
-        }
-        save_json(WANTED_FILE, initial_wanted)
-
-    if not os.path.exists(HISTORY_FILE):
-        initial_history = {
-            "А777МР777": [
-                {"type": "Нарушение ПДД", "desc": "Штраф 5000", "date": "2026-08-10 12:00"},
-                {"type": "РОЗЫСК", "desc": "Угон", "date": "2026-08-10 13:00"},
-                {"type": "Нарушение ПДД", "desc": "Превышение скорости", "date": "2026-08-09 15:30"}
-            ],
-            "В888УХ77": [
-                {"type": "Нарушение ПДД", "desc": "Парковка в неположенном месте", "date": "2026-08-08 10:00"}
-            ]
-        }
-        save_json(HISTORY_FILE, initial_history)
-
-    if not os.path.exists(FINES_FILE):
-        initial_fines = {
-            "user1": [
-                {"code": "264.1", "date": "2026-08-10T12:00", "reason": "Выезд на встречку"},
-                {"code": "12.8", "date": "2026-08-09T15:30", "reason": "Превышение скорости"}
-            ],
-            "user2": [
-                {"code": "264.1", "date": "2026-08-08T10:00", "reason": "Проезд на красный"}
-            ]
-        }
-        save_json(FINES_FILE, initial_fines)
-
-    if not os.path.exists(AUCTION_FILE):
-        initial_auction = {
-            "plate": "А001МР97",
-            "price": 1500000,
-            "author": "user2"
-        }
-        save_json(AUCTION_FILE, initial_auction)
-
-    if not os.path.exists(LOGS_FILE):
-        initial_logs = [
-            "2026-08-10 12:00 - Система инициализирована",
-            "2026-08-10 12:05 - Загружены начальные данные"
-        ]
-        save_json(LOGS_FILE, initial_logs)
+    with get_db() as conn:
+        conn.execute('''CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE
+        )''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS plates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            plate TEXT UNIQUE,
+            user_id INTEGER REFERENCES users(id),
+            price INTEGER,
+            rarity INTEGER
+        )''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS fines (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER REFERENCES users(id),
+            code TEXT,
+            date TEXT,
+            reason TEXT
+        )''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS wanted (
+            plate TEXT PRIMARY KEY,
+            reason TEXT
+        )''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            plate TEXT,
+            type TEXT,
+            desc TEXT,
+            date TEXT
+        )''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS auction (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            plate TEXT,
+            price INTEGER,
+            author TEXT
+        )''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            message TEXT,
+            date TEXT
+        )''')
+        conn.commit()
 
 init_db()
 
-def load_json(filepath):
-    if os.path.exists(filepath):
-        try:
-            with open(filepath, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-    return {}
-
-def save_json(filepath, data):
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
-
 def add_log(msg):
-    logs = load_json(LOGS_FILE)
-    if not isinstance(logs, list):
-        logs = []
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    logs.insert(0, f"{timestamp} - {msg}")
-    if len(logs) > 50:
-        logs = logs[:50]
-    save_json(LOGS_FILE, logs)
+    with get_db() as conn:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute("INSERT INTO logs (message, date) VALUES (?, ?)", (msg, timestamp))
+        conn.commit()
 
 def calculate_plate_details(plate):
     rarity = (sum(ord(c) for c in plate) % 90) + 10
@@ -192,22 +159,10 @@ HTML_TEMPLATE = """
         <div id="dashboard" class="tab-content active">
             <h2>Дашборд оперативного управления</h2>
             <div class="stats-grid">
-                <div class="stat-card">
-                    <h3 id="stat-plates">0</h3>
-                    <p>Всего номеров</p>
-                </div>
-                <div class="stat-card">
-                    <h3 id="stat-users">0</h3>
-                    <p>Пользователей</p>
-                </div>
-                <div class="stat-card">
-                    <h3 id="stat-fines">0</h3>
-                    <p>Штрафов</p>
-                </div>
-                <div class="stat-card">
-                    <h3 id="stat-wanted">0</h3>
-                    <p>В розыске</p>
-                </div>
+                <div class="stat-card"><h3 id="stat-plates">0</h3><p>Всего номеров</p></div>
+                <div class="stat-card"><h3 id="stat-users">0</h3><p>Пользователей</p></div>
+                <div class="stat-card"><h3 id="stat-fines">0</h3><p>Штрафов</p></div>
+                <div class="stat-card"><h3 id="stat-wanted">0</h3><p>В розыске</p></div>
             </div>
             <h3 style="color: #c9d1d9; font-size: 16px; margin-bottom: 10px;">Лента последних действий</h3>
             <div class="logs-box" id="logs-container">Загрузка логов...</div>
@@ -224,14 +179,7 @@ HTML_TEMPLATE = """
             </div>
             <table>
                 <thead>
-                    <tr>
-                        <th>Номер</th>
-                        <th>Владелец</th>
-                        <th>Цена</th>
-                        <th>Редкость</th>
-                        <th>Статус</th>
-                        <th>Действия</th>
-                    </tr>
+                    <tr><th>Номер</th><th>Владелец</th><th>Цена</th><th>Редкость</th><th>Статус</th><th>Действия</th></tr>
                 </thead>
                 <tbody id="plates-table-body">
                     <tr><td colspan="6" style="text-align: center;">Загрузка...</td></tr>
@@ -243,12 +191,7 @@ HTML_TEMPLATE = """
             <h2>Реестр пользователей</h2>
             <table>
                 <thead>
-                    <tr>
-                        <th>Пользователь / ID</th>
-                        <th>Количество номеров</th>
-                        <th>Количество штрафов</th>
-                        <th>Общая стоимость номеров</th>
-                    </tr>
+                    <tr><th>Пользователь / ID</th><th>Количество номеров</th><th>Количество штрафов</th><th>Общая стоимость</th></tr>
                 </thead>
                 <tbody id="users-table-body">
                     <tr><td colspan="4" style="text-align: center;">Загрузка...</td></tr>
@@ -262,20 +205,14 @@ HTML_TEMPLATE = """
                 <h3 style="font-size: 15px; color: #ffd700; margin-bottom: 12px;">➕ Выписать новый штраф</h3>
                 <div style="display: grid; grid-template-columns: 1fr 1fr 2fr auto; gap: 10px;">
                     <input type="text" id="fine-code" class="form-control" placeholder="Статья (например, 264.1)" style="margin-bottom:0;">
-                    <input type="text" id="fine-user" class="form-control" placeholder="Пользователь (ID)" style="margin-bottom:0;">
+                    <input type="text" id="fine-user" class="form-control" placeholder="Пользователь (ID или Имя)" style="margin-bottom:0;">
                     <input type="text" id="fine-reason" class="form-control" placeholder="Причина нарушения" style="margin-bottom:0;">
                     <button class="btn btn-primary" onclick="addFine()">Добавить</button>
                 </div>
             </div>
             <table>
                 <thead>
-                    <tr>
-                        <th>Статья</th>
-                        <th>Пользователь</th>
-                        <th>Дата</th>
-                        <th>Причина</th>
-                        <th>Действия</th>
-                    </tr>
+                    <tr><th>Статья</th><th>Пользователь</th><th>Дата</th><th>Причина</th><th>Действия</th></tr>
                 </thead>
                 <tbody id="fines-table-body">
                     <tr><td colspan="5" style="text-align: center;">Загрузка...</td></tr>
@@ -293,7 +230,7 @@ HTML_TEMPLATE = """
         <div id="dossier" class="tab-content">
             <h2>Досье транспортного средства</h2>
             <div class="toolbar" style="max-width: 500px;">
-                <input type="text" id="dossier-input" class="form-control" placeholder="Введите госномер..." style="margin-bottom: 0;">
+                <input type="text" id="dossier-input" class="form-control" placeholder="Введите госномер..." style="margin-bottom: 0;" oninput="this.value = this.value.toUpperCase()">
                 <button class="btn btn-primary" onclick="loadDossier()">🔍 Найти</button>
             </div>
             <div id="dossier-result" style="margin-top: 20px;">
@@ -306,7 +243,7 @@ HTML_TEMPLATE = """
     <div id="modal-give" class="modal">
         <div class="modal-box">
             <div class="modal-header"><span>🎖️ Выдать номер</span><button class="modal-close" onclick="closeModal('modal-give')">&times;</button></div>
-            <label style="font-size: 12px; color: #8b949e;">Пользователь (ID)</label>
+            <label style="font-size: 12px; color: #8b949e;">Пользователь</label>
             <select id="give-user-select" class="form-control"></select>
             <label style="font-size: 12px; color: #8b949e;">Госномер</label>
             <input type="text" id="give-plate-input" class="form-control" placeholder="А777МР777" oninput="this.value = this.value.toUpperCase()">
@@ -384,7 +321,7 @@ HTML_TEMPLATE = """
                 document.getElementById('stat-wanted').innerText = data.total_wanted;
             });
             fetch('/api/logs').then(res => res.json()).then(logs => {
-                document.getElementById('logs-container').innerHTML = logs.join('<br>');
+                document.getElementById('logs-container').innerHTML = logs.length > 0 ? logs.join('<br>') : 'Логи отсутствуют';
             });
         }
 
@@ -394,7 +331,7 @@ HTML_TEMPLATE = """
                 renderPlatesTable(data);
                 fetch('/api/users').then(r => r.json()).then(users => {
                     const sel = document.getElementById('give-user-select');
-                    sel.innerHTML = users.map(u => `<option value="${u.id}">${u.name}</option>`).join('');
+                    sel.innerHTML = users.map(u => `<option value="${u.id}">${u.name} (ID: ${u.id})</option>`).join('');
                 });
             });
         }
@@ -434,9 +371,13 @@ HTML_TEMPLATE = """
         function loadUsers() {
             fetch('/api/users').then(res => res.json()).then(data => {
                 const tbody = document.getElementById('users-table-body');
+                if(data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" style="text-align: center;">Нет пользователей</td></tr>';
+                    return;
+                }
                 tbody.innerHTML = data.map(u => `
                     <tr>
-                        <td><b>${u.id}</b> (${u.name})</td>
+                        <td><b>ID ${u.id}</b> (${u.name})</td>
                         <td>${u.plates_count}</td>
                         <td>${u.fines_count}</td>
                         <td class="price-val">${u.total_value.toLocaleString()} ₽</td>
@@ -458,7 +399,7 @@ HTML_TEMPLATE = """
                         <td>${f.user}</td>
                         <td>${f.date.replace('T', ' ')}</td>
                         <td>${f.reason}</td>
-                        <td><button class="btn btn-success" onclick="removeFine('${f.code}', '${f.user_id}')">✅ Снять</button></td>
+                        <td><button class="btn btn-success" onclick="removeFine('${f.code}', ${f.user_id})">✅ Снять</button></td>
                     </tr>
                 `).join('');
             });
@@ -509,7 +450,7 @@ HTML_TEMPLATE = """
             fetch('/api/auction').then(res => res.json()).then(data => {
                 const container = document.getElementById('auction-container');
                 if(!data.plate) {
-                    container.innerHTML = '<p style="color: #8b949e;">❌ На аукционе нет активных лотов</p>';
+                    container.innerHTML = '<p style="color: #8b949e;">❌ На аукционе нет лотов</p>';
                     return;
                 }
                 container.innerHTML = `
@@ -728,17 +669,11 @@ def index():
 
 @app.route("/api/stats")
 def api_stats():
-    data = load_json(DATA_FILE)
-    user_plates = data.get("user_plates", {})
-    total_plates = sum(len(plates) for plates in user_plates.values())
-    total_users = len(user_plates)
-    
-    fines_data = load_json(FINES_FILE)
-    total_fines = sum(len(fines) for fines in fines_data.values())
-    
-    wanted_data = load_json(WANTED_FILE)
-    total_wanted = len(wanted_data)
-    
+    with get_db() as conn:
+        total_plates = conn.execute("SELECT COUNT(*) FROM plates").fetchone()[0]
+        total_users = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        total_fines = conn.execute("SELECT COUNT(*) FROM fines").fetchone()[0]
+        total_wanted = conn.execute("SELECT COUNT(*) FROM wanted").fetchone()[0]
     return jsonify({
         "total_plates": total_plates,
         "total_users": total_users,
@@ -748,93 +683,112 @@ def api_stats():
 
 @app.route("/api/plates")
 def api_plates():
-    data = load_json(DATA_FILE)
-    user_plates = data.get("user_plates", {})
-    wanted_data = load_json(WANTED_FILE)
-    
+    with get_db() as conn:
+        cursor = conn.execute('''
+            SELECT p.plate, u.name as owner, p.price, p.rarity, w.plate as wanted_plate
+            FROM plates p
+            LEFT JOIN users u ON p.user_id = u.id
+            LEFT JOIN wanted w ON p.plate = w.plate
+        ''')
+        rows = cursor.fetchall()
     result = []
-    for owner, plates in user_plates.items():
-        for plate in plates:
-            rarity, price = calculate_plate_details(plate)
-            is_wanted = plate in wanted_data
-            result.append({
-                "plate": plate,
-                "owner": owner,
-                "price": price,
-                "rarity": rarity,
-                "wanted": is_wanted
-            })
+    for row in rows:
+        result.append({
+            "plate": row["plate"],
+            "owner": row["owner"] or "Неизвестен",
+            "price": row["price"],
+            "rarity": row["rarity"],
+            "wanted": row["wanted_plate"] is not None
+        })
     return jsonify(result)
 
 @app.route("/api/users")
 def api_users():
-    data = load_json(DATA_FILE)
-    user_plates = data.get("user_plates", {})
-    fines_data = load_json(FINES_FILE)
-    
+    with get_db() as conn:
+        cursor = conn.execute('''
+            SELECT u.id, u.name,
+                   COUNT(DISTINCT p.id) as plates_count,
+                   COUNT(DISTINCT f.id) as fines_count,
+                   COALESCE(SUM(p.price), 0) as total_value
+            FROM users u
+            LEFT JOIN plates p ON u.id = p.user_id
+            LEFT JOIN fines f ON u.id = f.user_id
+            GROUP BY u.id
+            ORDER BY plates_count DESC
+        ''')
+        rows = cursor.fetchall()
     users_list = []
-    for uid, plates in user_plates.items():
-        fines_count = len(fines_data.get(uid, []))
-        total_value = sum(calculate_plate_details(p)[1] for p in plates)
+    for row in rows:
         users_list.append({
-            "id": uid,
-            "name": f"Оперативник / Гражданин {uid}",
-            "plates_count": len(plates),
-            "fines_count": fines_count,
-            "total_value": total_value
+            "id": row["id"],
+            "name": row["name"],
+            "plates_count": row["plates_count"],
+            "fines_count": row["fines_count"],
+            "total_value": row["total_value"]
         })
-    
-    users_list.sort(key=lambda x: x["plates_count"], reverse=True)
     return jsonify(users_list)
 
 @app.route("/api/fines")
 def api_fines():
-    fines_data = load_json(FINES_FILE)
+    with get_db() as conn:
+        cursor = conn.execute('''
+            SELECT f.code, u.name as user_name, u.id as user_id, f.date, f.reason
+            FROM fines f
+            JOIN users u ON f.user_id = u.id
+        ''')
+        rows = cursor.fetchall()
     result = []
-    for uid, fines in fines_data.items():
-        for f in fines:
-            result.append({
-                "code": f.get("code"),
-                "user": uid,
-                "user_id": uid,
-                "date": f.get("date"),
-                "reason": f.get("reason")
-            })
+    for row in rows:
+        result.append({
+            "code": row["code"],
+            "user": row["user_name"],
+            "user_id": row["user_id"],
+            "date": row["date"],
+            "reason": row["reason"]
+        })
     return jsonify(result)
 
 @app.route("/api/auction")
 def api_auction():
-    auction = load_json(AUCTION_FILE)
-    return jsonify(auction if auction and "plate" in auction else {})
+    with get_db() as conn:
+        row = conn.execute("SELECT plate, price, author FROM auction ORDER BY id DESC LIMIT 1").fetchone()
+    if row:
+        return jsonify({"plate": row["plate"], "price": row["price"], "author": row["author"]})
+    return jsonify({})
 
 @app.route("/api/logs")
 def api_logs():
-    logs = load_json(LOGS_FILE)
-    return jsonify(logs[:20] if isinstance(logs, list) else [])
+    with get_db() as conn:
+        rows = conn.execute("SELECT date, message FROM logs ORDER BY id DESC LIMIT 20").fetchall()
+    logs = [f"{row['date']} - {row['message']}" for row in rows]
+    return jsonify(logs)
 
 @app.route("/api/dossier/<plate>")
 def api_dossier(plate):
-    data = load_json(DATA_FILE)
-    user_plates = data.get("user_plates", {})
-    wanted_data = load_json(WANTED_FILE)
-    history_data = load_json(HISTORY_FILE)
+    plate = plate.upper().strip()
+    with get_db() as conn:
+        p_row = conn.execute('''
+            SELECT p.plate, u.name as owner, p.price, p.rarity
+            FROM plates p
+            LEFT JOIN users u ON p.user_id = u.id
+            WHERE p.plate = ?
+        ''', (plate,)).fetchone()
+        
+        w_row = conn.execute("SELECT reason FROM wanted WHERE plate = ?", (plate,)).fetchone()
+        h_rows = conn.execute("SELECT type, desc, date FROM history WHERE plate = ? ORDER BY id DESC LIMIT 10", (plate,)).fetchall()
     
-    owner = None
-    for uid, plates in user_plates.items():
-        if plate in plates:
-            owner = uid
-            break
-            
-    if not owner and plate not in wanted_data and plate not in history_data:
+    if not p_row and not w_row and not h_rows:
         return jsonify({"found": False})
-        
-    if not owner:
-        owner = "Неизвестен / В розыске"
-        
+    
+    owner = p_row["owner"] if p_row and p_row["owner"] else ("Неизвестен / В розыске" if w_row else "Неизвестен")
     rarity, price = calculate_plate_details(plate)
-    is_wanted = plate in wanted_data
-    wanted_reason = wanted_data.get(plate, "")
-    history = history_data.get(plate, [])
+    if p_row:
+        price = p_row["price"]
+        rarity = p_row["rarity"]
+        
+    is_wanted = w_row is not None
+    wanted_reason = w_row["reason"] if w_row else ""
+    history = [{"type": h["type"], "desc": h["desc"], "date": h["date"]} for h in h_rows]
     
     return jsonify({
         "found": True,
@@ -844,7 +798,7 @@ def api_dossier(plate):
         "rarity": rarity,
         "wanted": is_wanted,
         "wanted_reason": wanted_reason,
-        "history": history[:10]
+        "history": history
     })
 
 @app.route("/api/give", methods=["POST"])
@@ -852,75 +806,58 @@ def api_give():
     req = request.json or {}
     user_id = req.get("user_id")
     plate = req.get("plate", "").strip().upper()
-    
     if not user_id or not plate:
         return jsonify({"success": False, "error": "Заполните все поля"})
-        
-    data = load_json(DATA_FILE)
-    user_plates = data.get("user_plates", {})
-    
-    for u, plates in user_plates.items():
-        if plate in plates:
-            return jsonify({"success": False, "error": "Номер уже занят"})
-            
-    if user_id not in user_plates:
-        user_plates[user_id] = []
-        
-    user_plates[user_id].append(plate)
-    data["user_plates"] = user_plates
-    save_json(DATA_FILE, data)
-    
-    add_log(f"Выдан госномер {plate} пользователю {user_id}")
-    return jsonify({"success": True})
+    rarity, price = calculate_plate_details(plate)
+    try:
+        with get_db() as conn:
+            existing = conn.execute("SELECT id FROM plates WHERE plate = ?", (plate,)).fetchone()
+            if existing:
+                return jsonify({"success": False, "error": "Номер уже занят"})
+            conn.execute("INSERT INTO plates (plate, user_id, price, rarity) VALUES (?, ?, ?, ?)", (plate, user_id, price, rarity))
+            conn.commit()
+        add_log(f"Выдан госномер {plate} пользователю ID {user_id}")
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
 
 @app.route("/api/revoke", methods=["POST"])
 def api_revoke():
     req = request.json or {}
     plate = req.get("plate")
-    
-    data = load_json(DATA_FILE)
-    user_plates = data.get("user_plates", {})
-    
-    found_owner = None
-    for u, plates in user_plates.items():
-        if plate in plates:
-            found_owner = u
-            plates.remove(plate)
-            break
-            
-    if found_owner:
-        if len(user_plates[found_owner]) == 0:
-            del user_plates[found_owner]
-        data["user_plates"] = user_plates
-        save_json(DATA_FILE, data)
-        add_log(f"Изъят госномер {plate} у пользователя {found_owner}")
-        return jsonify({"success": True})
-        
+    if not plate:
+        return jsonify({"success": False, "error": "Не указан номер"})
+    with get_db() as conn:
+        cursor = conn.execute("DELETE FROM plates WHERE plate = ?", (plate,))
+        conn.commit()
+        if cursor.rowcount > 0:
+            add_log(f"Изъят госномер {plate}")
+            return jsonify({"success": True})
     return jsonify({"success": False, "error": "Номер не найден"})
 
 @app.route("/api/fine/add", methods=["POST"])
 def api_fine_add():
     req = request.json or {}
     code = req.get("code")
-    user = req.get("user")
+    user_input = req.get("user")
     reason = req.get("reason")
-    
-    if not code or not user or not reason:
+    if not code or not user_input or not reason:
         return jsonify({"success": False, "error": "Заполните все поля"})
-        
-    fines = load_json(FINES_FILE)
-    if user not in fines:
-        fines[user] = []
-        
-    fine_entry = {
-        "code": code,
-        "date": datetime.now().strftime("%Y-%m-%dT%H:%M"),
-        "reason": reason
-    }
-    fines[user].append(fine_entry)
-    save_json(FINES_FILE, fines)
     
-    add_log(f"Выписан штраф ст. {code} пользователю {user}")
+    with get_db() as conn:
+        u_row = conn.execute("SELECT id FROM users WHERE id = ? OR name = ?", (user_input, user_input)).fetchone()
+        if not u_row:
+            conn.execute("INSERT OR IGNORE INTO users (name) VALUES (?)", (str(user_input),))
+            conn.commit()
+            u_row = conn.execute("SELECT id FROM users WHERE name = ?", (str(user_input),)).fetchone()
+        user_id = u_row["id"] if u_row else None
+        if not user_id:
+            return jsonify({"success": False, "error": "Пользователь не найден"})
+        
+        date_str = datetime.now().strftime("%Y-%m-%dT%H:%M")
+        conn.execute("INSERT INTO fines (user_id, code, date, reason) VALUES (?, ?, ?, ?)", (user_id, code, date_str, reason))
+        conn.commit()
+    add_log(f"Выписан штраф ст. {code} пользователю {user_input}")
     return jsonify({"success": True})
 
 @app.route("/api/fine/remove", methods=["POST"])
@@ -928,39 +865,35 @@ def api_fine_remove():
     req = request.json or {}
     code = req.get("code")
     user_id = req.get("user_id")
-    
-    fines = load_json(FINES_FILE)
-    if user_id in fines:
-        fines[user_id] = [f for f in fines[user_id] if f.get("code") != code]
-        if len(fines[user_id]) == 0:
-            del fines[user_id]
-        save_json(FINES_FILE, fines)
-        add_log(f"Снят штраф ст. {code} у пользователя {user_id}")
-        return jsonify({"success": True})
-        
-    return jsonify({"success": False})
+    with get_db() as conn:
+        conn.execute("DELETE FROM fines WHERE code = ? AND user_id = ?", (code, user_id))
+        conn.commit()
+    add_log(f"Снят штраф ст. {code} у пользователя ID {user_id}")
+    return jsonify({"success": True})
 
 @app.route("/api/bid", methods=["POST"])
 def api_bid():
     req = request.json or {}
     amount = req.get("amount")
-    
-    auction = load_json(AUCTION_FILE)
-    if not auction or "plate" not in auction:
-        return jsonify({"success": False, "error": "Аукцион неактивен"})
-        
-    if amount <= auction.get("price", 0):
-        return jsonify({"success": False, "error": "Ставка должна быть выше текущей"})
-        
-    auction["price"] = amount
-    save_json(AUCTION_FILE, auction)
-    add_log(f"Сделана ставка {amount} ₽ на лот {auction['plate']}")
+    if not amount:
+        return jsonify({"success": False, "error": "Введите сумму"})
+    with get_db() as conn:
+        row = conn.execute("SELECT id, price FROM auction ORDER BY id DESC LIMIT 1").fetchone()
+        if not row:
+            return jsonify({"success": False, "error": "Аукцион неактивен"})
+        if int(amount) <= row["price"]:
+            return jsonify({"success": False, "error": "Ставка должна быть выше текущей"})
+        conn.execute("UPDATE auction SET price = ? WHERE id = ?", (int(amount), row["id"]))
+        conn.commit()
+    add_log(f"Сделана ставка {amount} ₽ на аукционе")
     return jsonify({"success": True})
 
 @app.route("/api/auction/end", methods=["POST"])
 def api_auction_end():
-    save_json(AUCTION_FILE, {})
-    add_log("Аукцион завершен оператором")
+    with get_db() as conn:
+        conn.execute("DELETE FROM auction")
+        conn.commit()
+    add_log("Аукцион завершен")
     return jsonify({"success": True})
 
 @app.route("/api/protocol", methods=["POST"])
@@ -969,22 +902,12 @@ def api_protocol():
     plate = req.get("plate")
     ptype = req.get("type")
     desc = req.get("desc")
-    
     if not plate or not desc:
-        return jsonify({"success": False})
-        
-    history = load_json(HISTORY_FILE)
-    if plate not in history:
-        history[plate] = []
-        
-    entry = {
-        "type": ptype,
-        "desc": desc,
-        "date": datetime.now().strftime("%Y-%m-%d %H:%M")
-    }
-    history[plate].insert(0, entry)
-    save_json(HISTORY_FILE, history)
-    
+        return jsonify({"success": False, "error": "Заполните все поля"})
+    date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    with get_db() as conn:
+        conn.execute("INSERT INTO history (plate, type, desc, date) VALUES (?, ?, ?, ?)", (plate, ptype, desc, date_str))
+        conn.commit()
     add_log(f"Составлен протокол ({ptype}) для т/с {plate}")
     return jsonify({"success": True})
 
@@ -993,51 +916,29 @@ def api_wanted():
     req = request.json or {}
     plate = req.get("plate")
     reason = req.get("reason")
-    
     if not plate or not reason:
-        return jsonify({"success": False})
-        
-    wanted = load_json(WANTED_FILE)
-    wanted[plate] = reason
-    save_json(WANTED_FILE, wanted)
-    
-    history = load_json(HISTORY_FILE)
-    if plate not in history:
-        history[plate] = []
-    history[plate].insert(0, {
-        "type": "РОЗЫСК",
-        "desc": reason,
-        "date": datetime.now().strftime("%Y-%m-%d %H:%M")
-    })
-    save_json(HISTORY_FILE, history)
-    
-    add_log(f"Транспортное средство {plate} объявлено в розыск: {reason}")
+        return jsonify({"success": False, "error": "Заполните все поля"})
+    date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    with get_db() as conn:
+        conn.execute("INSERT OR REPLACE INTO wanted (plate, reason) VALUES (?, ?)", (plate, reason))
+        conn.execute("INSERT INTO history (plate, type, desc, date) VALUES (?, ?, ?, ?)", (plate, "РОЗЫСК", reason, date_str))
+        conn.commit()
+    add_log(f"Транспорт {plate} объявлен в розыск: {reason}")
     return jsonify({"success": True})
 
 @app.route("/api/unwanted", methods=["POST"])
 def api_unwanted():
     req = request.json or {}
     plate = req.get("plate")
-    
-    wanted = load_json(WANTED_FILE)
-    if plate in wanted:
-        del wanted[plate]
-        save_json(WANTED_FILE, wanted)
-        
-        history = load_json(HISTORY_FILE)
-        if plate not in history:
-            history[plate] = []
-        history[plate].insert(0, {
-            "type": "СНЯТ С РОЗЫСКА",
-            "desc": "Розыск аннулирован",
-            "date": datetime.now().strftime("%Y-%m-%d %H:%M")
-        })
-        save_json(HISTORY_FILE, history)
-        
-        add_log(f"Транспортное средство {plate} снято с розыска")
-        return jsonify({"success": True})
-        
-    return jsonify({"success": False})
+    if not plate:
+        return jsonify({"success": False, "error": "Не указан номер"})
+    date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    with get_db() as conn:
+        conn.execute("DELETE FROM wanted WHERE plate = ?", (plate,))
+        conn.execute("INSERT INTO history (plate, type, desc, date) VALUES (?, ?, ?, ?)", (plate, "СНЯТ С РОЗЫСКА", "Розыск аннулирован", date_str))
+        conn.commit()
+    add_log(f"Транспорт {plate} снят с розыска")
+    return jsonify({"success": True})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
