@@ -106,6 +106,10 @@ def check_banned_user():
         if row and row[0] == 1:
             session.clear()
 
+@app.context_processor
+def inject_user_data():
+    return dict(global_user_data=get_current_user_data())
+
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ru">
@@ -127,9 +131,18 @@ HTML_TEMPLATE = """
             </div>
             <div class="flex items-center space-x-4">
                 {% if 'user' in session %}
-                    <span class="text-sm text-gray-300 hidden sm:inline">
-                        {{ session['user'] }} {% if session['user'] == 'danyasexual@gmail.com' %}<span class="text-xs bg-red-950 text-red-400 px-1.5 py-0.5 rounded border border-red-900 ml-1">Админ</span>{% endif %}
-                    </span>
+                    <div class="flex items-center space-x-2">
+                        <span class="text-sm text-gray-300 hidden sm:inline">{{ session['user'] }}</span>
+                        {% if global_user_data and global_user_data[7] == 1 %}
+                            <span class="text-xs text-indigo-300 bg-indigo-950/80 px-2.5 py-1 rounded border border-indigo-800/80 font-medium flex items-center space-x-1">
+                                <span>{{ global_user_data[4] }}</span>
+                                <span class="text-gray-400">({{ global_user_data[5] }} лет)</span>
+                            </span>
+                        {% endif %}
+                        {% if session['user'] == 'danyasexual@gmail.com' %}
+                            <span class="text-xs bg-red-950 text-red-400 px-1.5 py-0.5 rounded border border-red-900 ml-1">Админ</span>
+                        {% endif %}
+                    </div>
                     <a href="/logout" class="bg-gray-800 hover:bg-gray-700 text-gray-200 px-3 py-1.5 rounded text-sm transition border border-gray-700">Выйти</a>
                 {% else %}
                     <a href="/login-google" class="bg-indigo-700 hover:bg-indigo-600 text-white px-4 py-1.5 rounded text-sm font-medium transition">Войти через Google</a>
@@ -783,12 +796,24 @@ def register_char():
         age = request.form.get("age")
         job = request.form.get("job")
         
+        old_user_data = get_current_user_data()
+        old_ic_name = old_user_data[4] if old_user_data else None
+        
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("""
             UPDATE users SET roblox_nick=?, ic_name=?, age=?, job=?, registered=1 
             WHERE google_email=?
         """, (roblox_nick, ic_name, age, job, session['user']))
+        
+        if old_ic_name and old_ic_name != ic_name:
+            cursor.execute("UPDATE plates SET owner_ic=? WHERE owner_ic=?", (ic_name, old_ic_name))
+            cursor.execute("UPDATE vehicles SET owner_ic=? WHERE owner_ic=?", (ic_name, old_ic_name))
+            cursor.execute("UPDATE fines SET ic_name=? WHERE ic_name=?", (ic_name, old_ic_name))
+            cursor.execute("UPDATE appeals SET ic_name=? WHERE ic_name=?", (ic_name, old_ic_name))
+            
+        cursor.execute("UPDATE plates SET owner_ic=? WHERE owner_ic='Гражданин' OR owner_ic IS NULL", (ic_name,))
+        
         conn.commit()
         conn.close()
         
