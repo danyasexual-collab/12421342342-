@@ -51,7 +51,6 @@ def init_db():
         )
     ''')
     
-    # Добавим демо-данные, если пусто
     cursor.execute("SELECT COUNT(*) FROM plates")
     if cursor.fetchone()[0] == 0:
         sample_plates = [
@@ -102,7 +101,6 @@ HTML_TEMPLATE = """
     </header>
 
     <div class="max-w-7xl mx-auto px-4 py-8 grid grid-cols-1 md:grid-cols-4 gap-6">
-        <!-- Навигация -->
         <div class="md:col-span-1 bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xl h-fit">
             <h2 class="text-xs uppercase tracking-wider text-slate-400 font-bold mb-3 px-2">Меню управления</h2>
             <nav class="space-y-1">
@@ -123,7 +121,6 @@ HTML_TEMPLATE = """
             </nav>
         </div>
 
-        <!-- Контент -->
         <div class="md:col-span-3 bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl">
             {% if active == 'home' %}
                 <h1 class="text-2xl font-bold mb-4">Официальный портал ФГУП «ГИБДД-РФ»</h1>
@@ -158,7 +155,7 @@ HTML_TEMPLATE = """
                 <h1 class="text-2xl font-bold mb-4">Регистрация персонажа</h1>
                 <p class="text-xs text-slate-400 mb-6">Вы можете пропустить этот шаг, но 90% функций портала останутся недоступными.</p>
                 
-                <form method="POST" action="/save-char" class="space-y-4 max-w-lg">
+                <form method="POST" action="/register-char" class="space-y-4 max-w-lg">
                     <div>
                         <label class="block text-xs uppercase font-semibold text-slate-400 mb-1">Ник в Roblox</label>
                         <input type="text" name="roblox_nick" value="{{ user_data[3] if user_data else '' }}" required class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
@@ -271,7 +268,6 @@ def index():
 
 @app.route("/login-google")
 def login_google():
-    # Симуляция входа через Google для демонстрации на Vercel
     session['user'] = "user_google@gmail.com"
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -286,34 +282,31 @@ def logout():
     session.clear()
     return redirect(url_for('index'))
 
-@app.route("/register-char")
+@app.route("/register-char", methods=["GET", "POST"])
 def register_char():
     if 'user' not in session:
         return redirect(url_for('index'))
+    
+    if request.method == "POST":
+        roblox_nick = request.form.get("roblox_nick")
+        ic_name = request.form.get("ic_name")
+        age = request.form.get("age")
+        job = request.form.get("job")
+        
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE users SET roblox_nick=?, ic_name=?, age=?, job=?, registered=1 
+            WHERE google_email=?
+        """, (roblox_nick, ic_name, age, job, session['user']))
+        conn.commit()
+        conn.close()
+        
+        session['registered'] = True
+        return redirect(url_for('index'))
+        
     user_data = get_current_user_data()
     return render_template_string(HTML_TEMPLATE, active="register", user_data=user_data)
-
-@app.route("/save-char", methods=["POST"])
-def save_char():
-    if 'user' not in session:
-        return redirect(url_for('index'))
-    
-    roblox_nick = request.form.get("roblox_nick")
-    ic_name = request.form.get("ic_name")
-    age = request.form.get("age")
-    job = request.form.get("job")
-    
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("""
-        UPDATE users SET roblox_nick=?, ic_name=?, age=?, job=?, registered=1 
-        WHERE google_email=?
-    """, (roblox_nick, ic_name, age, job, session['user']))
-    conn.commit()
-    conn.close()
-    
-    session['registered'] = True
-    return redirect(url_for('index'))
 
 @app.route("/plates")
 def plates():
@@ -357,7 +350,6 @@ def fines():
     cursor.execute("SELECT id, ic_name, amount, reason, status FROM fines WHERE ic_name=?", (ic_name,))
     fines_list = cursor.fetchall()
     
-    # Добавим демо-штраф, если у пользователя нет штрафов
     if not fines_list:
         cursor.execute("INSERT INTO fines (ic_name, amount, reason, status) VALUES (?, ?, ?, ?)", 
                        (ic_name, 5000, "Превышение скорости на трассе М-1", "Не оплачен"))
