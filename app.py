@@ -400,8 +400,7 @@ HTML_TEMPLATE = """
                             <input type="text" name="job" value="{{ user_data[6] if user_data else '' }}" required class="w-full bg-gray-900 border border-gray-800 rounded px-3 py-2 text-gray-200 focus:outline-none focus:border-indigo-600">
                         </div>
                         <div class="flex space-x-3 pt-2">
-                            <button type="submit" class="bg-indigo-700 hover:bg-indigo-600 text-white px-4 py-2 rounded text-xs font-medium transition">Сохранить данные</button>
-                            <a href="/" class="bg-gray-800 hover:bg-gray-700 text-gray-300 px-4 py-2 rounded text-xs transition flex items-center">Пропустить</a>
+                            <button type="submit" class="bg-indigo-700 hover:bg-indigo-600 text-white px-4 py-2 rounded text-xs font-medium transition">Завершить регистрацию</button>
                         </div>
                     </form>
                 {% endif %}
@@ -793,7 +792,7 @@ def register_char():
     if request.method == "POST":
         roblox_nick = request.form.get("roblox_nick")
         ic_name = request.form.get("ic_name")
-        age = request.form.get("age")
+        age = int(request.form.get("age", 0))
         job = request.form.get("job")
         
         old_user_data = get_current_user_data()
