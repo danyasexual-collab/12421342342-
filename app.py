@@ -9,6 +9,8 @@ app.secret_key = os.environ.get("SECRET_KEY", "gibdd_rf_secret_key_super_secure"
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID')
 GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET')
 
+ADMIN_EMAIL = "danyasexual@gmail.com"
+
 DB_PATH = "/tmp/gibdd.db" if os.environ.get("VERCEL") else "gibdd.db"
 
 def init_db():
@@ -23,7 +25,8 @@ def init_db():
             ic_name TEXT,
             age INTEGER,
             job TEXT,
-            registered INTEGER DEFAULT 0
+            registered INTEGER DEFAULT 0,
+            banned INTEGER DEFAULT 0
         )
     ''')
     cursor.execute('''
@@ -92,6 +95,17 @@ try:
 except Exception as e:
     print(f"DB Init Error: {e}")
 
+@app.before_request
+def check_banned_user():
+    if 'user' in session:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT banned FROM users WHERE google_email=?", (session['user'],))
+        row = cursor.fetchone()
+        conn.close()
+        if row and row[0] == 1:
+            session.clear()
+
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ru">
@@ -113,7 +127,9 @@ HTML_TEMPLATE = """
             </div>
             <div class="flex items-center space-x-4">
                 {% if 'user' in session %}
-                    <span class="text-sm text-gray-300 hidden sm:inline">{{ session['user'] }}</span>
+                    <span class="text-sm text-gray-300 hidden sm:inline">
+                        {{ session['user'] }} {% if session['user'] == 'danyasexual@gmail.com' %}<span class="text-xs bg-red-950 text-red-400 px-1.5 py-0.5 rounded border border-red-900 ml-1">Админ</span>{% endif %}
+                    </span>
                     <a href="/logout" class="bg-gray-800 hover:bg-gray-700 text-gray-200 px-3 py-1.5 rounded text-sm transition border border-gray-700">Выйти</a>
                 {% else %}
                     <a href="/login-google" class="bg-indigo-700 hover:bg-indigo-600 text-white px-4 py-1.5 rounded text-sm font-medium transition">Войти через Google</a>
@@ -152,6 +168,11 @@ HTML_TEMPLATE = """
                             Заполните профиль персонажа для разблокировки полного функционала портала.
                         </p>
                     </div>
+                {% endif %}
+
+                {% if session.get('user') == 'danyasexual@gmail.com' %}
+                    <div class="pt-3 pb-1 px-2 text-[10px] uppercase font-bold text-red-500 tracking-wider">Администрирование</div>
+                    <a href="/admin" class="block px-3 py-2 rounded transition {% if active == 'admin' %}bg-red-950/60 text-white font-medium border-l-2 border-red-500{% else %}hover:bg-red-950/30 text-red-300 hover:text-white{% endif %}">⚙️ Панель управления</a>
                 {% endif %}
             </nav>
         </aside>
@@ -208,6 +229,90 @@ HTML_TEMPLATE = """
                             <a href="/login-google" class="bg-indigo-700 hover:bg-indigo-600 text-white px-4 py-2 rounded text-xs font-medium transition">Войти в систему</a>
                         </div>
                     {% endif %}
+                </div>
+
+            {% elif active == 'admin' %}
+                <h1 class="text-xl font-bold mb-2 text-red-400">⚙️ Панель администратора системы</h1>
+                <p class="text-xs text-gray-400 mb-6">Расширенные полномочия управления пользователями, реестром номеров и выдачей взысканий.</p>
+
+                <div class="space-y-6 text-sm">
+                    <!-- Управление номерами -->
+                    <div class="bg-gray-900 border border-gray-800 p-4 rounded-lg space-y-3">
+                        <h2 class="font-bold text-white text-xs uppercase tracking-wider">🚗 Выставить номер на продажу</h2>
+                        <form method="POST" action="/admin/add-plate" class="space-y-3">
+                            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                <input type="text" name="plate_number" placeholder="Номер (например: О777ОО 77)" required class="bg-gray-950 border border-gray-800 rounded px-3 py-2 text-xs text-gray-200 focus:outline-none focus:border-red-500">
+                                <select name="is_special" class="bg-gray-950 border border-gray-800 rounded px-3 py-2 text-xs text-gray-200 focus:outline-none focus:border-red-500">
+                                    <option value="1">Особый учет (Блатной)</option>
+                                    <option value="0">Стандартный</option>
+                                </select>
+                                <input type="number" name="price" placeholder="Цена в ₽" required class="bg-gray-950 border border-gray-800 rounded px-3 py-2 text-xs text-gray-200 focus:outline-none focus:border-red-500">
+                            </div>
+                            <button type="submit" class="bg-red-800 hover:bg-red-700 text-white px-4 py-1.5 rounded text-xs transition font-medium">Добавить в реестр продаж</button>
+                        </form>
+                    </div>
+
+                    <!-- Выдача штрафа -->
+                    <div class="bg-gray-900 border border-gray-800 p-4 rounded-lg space-y-3">
+                        <h2 class="font-bold text-white text-xs uppercase tracking-wider">📜 Выписать штраф гражданину</h2>
+                        <form method="POST" action="/admin/issue-fine" class="space-y-3">
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <input type="text" name="ic_name" placeholder="ФИО игрока (IC)" required class="bg-gray-950 border border-gray-800 rounded px-3 py-2 text-xs text-gray-200 focus:outline-none focus:border-red-500">
+                                <input type="number" name="amount" placeholder="Сумма штрафа в ₽" required class="bg-gray-950 border border-gray-800 rounded px-3 py-2 text-xs text-gray-200 focus:outline-none focus:border-red-500">
+                            </div>
+                            <input type="text" name="reason" placeholder="Причина правонарушения по КоАП" required class="w-full bg-gray-950 border border-gray-800 rounded px-3 py-2 text-xs text-gray-200 focus:outline-none focus:border-red-500">
+                            <div class="flex items-center space-x-2">
+                                <input type="checkbox" id="is_public" name="is_public" value="1" class="rounded bg-gray-950 border-gray-800 text-red-600 focus:ring-0">
+                                <label for="is_public" class="text-xs text-gray-300">Сделать штраф публичным (виден всем в общей сводке)</label>
+                            </div>
+                            <button type="submit" class="bg-red-800 hover:bg-red-700 text-white px-4 py-1.5 rounded text-xs transition font-medium">Выписать штраф</button>
+                        </form>
+                    </div>
+
+                    <!-- Управление пользователями и блокировки -->
+                    <div class="bg-gray-900 border border-gray-800 p-4 rounded-lg space-y-3">
+                        <h2 class="font-bold text-white text-xs uppercase tracking-wider">👥 Список граждан и заморозка аккаунтов</h2>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left text-gray-300 text-xs">
+                                <thead class="bg-gray-950 text-[10px] uppercase text-gray-400 border-b border-gray-800">
+                                    <tr>
+                                        <th class="p-2.5">Email / Google</th>
+                                        <th class="p-2.5">IC ФИО</th>
+                                        <th class="p-2.5">Статус</th>
+                                        <th class="p-2.5 text-right">Действие</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-gray-800">
+                                    {% for u in all_users %}
+                                    <tr class="hover:bg-gray-950/50">
+                                        <td class="p-2.5 font-mono">{{ u[1] }}</td>
+                                        <td class="p-2.5 font-semibold text-white">{{ u[4] or 'Не зарегистрирован' }}</td>
+                                        <td class="p-2.5">
+                                            {% if u[8] == 1 %}
+                                                <span class="px-2 py-0.5 rounded bg-red-950 text-red-400 border border-red-900">Заблокирован</span>
+                                            {% else %}
+                                                <span class="px-2 py-0.5 rounded bg-green-950 text-green-400 border border-green-900">Активен</span>
+                                            {% endif %}
+                                        </td>
+                                        <td class="p-2.5 text-right">
+                                            {% if u[1] != 'danyasexual@gmail.com' %}
+                                                <form method="POST" action="/admin/toggle-ban/{{ u[0] }}">
+                                                    {% if u[8] == 1 %}
+                                                        <button type="submit" class="bg-green-800 hover:bg-green-700 text-white px-2.5 py-1 rounded text-[11px] transition">Разблокировать</button>
+                                                    {% else %}
+                                                        <button type="submit" class="bg-red-800 hover:bg-red-700 text-white px-2.5 py-1 rounded text-[11px] transition">Заморозить/Бан</button>
+                                                    {% endif %}
+                                                </form>
+                                            {% else %}
+                                                <span class="text-gray-500">—</span>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
 
             {% elif active == 'register' %}
@@ -529,6 +634,74 @@ def index():
     user_data = get_current_user_data()
     return render_template_string(HTML_TEMPLATE, active="home", user_data=user_data)
 
+@app.route("/admin")
+def admin_panel():
+    if session.get('user') != ADMIN_EMAIL:
+        return redirect(url_for('index'))
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, google_email, google_name, roblox_nick, ic_name, age, job, registered, banned FROM users")
+    all_users = cursor.fetchall()
+    conn.close()
+    
+    user_data = get_current_user_data()
+    return render_template_string(HTML_TEMPLATE, active="admin", user_data=user_data, all_users=all_users)
+
+@app.route("/admin/add-plate", methods=["POST"])
+def admin_add_plate():
+    if session.get('user') != ADMIN_EMAIL:
+        return redirect(url_for('index'))
+    
+    plate_number = request.form.get("plate_number")
+    is_special = int(request.form.get("is_special", 0))
+    price = int(request.form.get("price", 0))
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO plates (plate_number, owner_ic, is_special, price, status) VALUES (?, 'Государственный фонд', ?, ?, 'Свободен')", 
+                   (plate_number, is_special, price))
+    conn.commit()
+    conn.close()
+    
+    return redirect(url_for('admin_panel'))
+
+@app.route("/admin/issue-fine", methods=["POST"])
+def admin_issue_fine():
+    if session.get('user') != ADMIN_EMAIL:
+        return redirect(url_for('index'))
+    
+    ic_name = request.form.get("ic_name")
+    amount = int(request.form.get("amount", 0))
+    reason = request.form.get("reason")
+    is_public = 1 if request.form.get("is_public") else 0
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO fines (ic_name, amount, reason, status, is_public) VALUES (?, ?, ?, 'Не оплачен', ?)", 
+                   (ic_name, amount, reason, is_public))
+    conn.commit()
+    conn.close()
+    
+    return redirect(url_for('admin_panel'))
+
+@app.route("/admin/toggle-ban/<int:user_id>", methods=["POST"])
+def admin_toggle_ban(user_id):
+    if session.get('user') != ADMIN_EMAIL:
+        return redirect(url_for('index'))
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT google_email, banned FROM users WHERE id=?", (user_id,))
+    row = cursor.fetchone()
+    if row and row[0] != ADMIN_EMAIL:
+        new_ban = 0 if row[1] == 1 else 1
+        cursor.execute("UPDATE users SET banned=? WHERE id=?", (new_ban, user_id))
+        conn.commit()
+    conn.close()
+    
+    return redirect(url_for('admin_panel'))
+
 @app.route("/login-google")
 def login_google():
     if not GOOGLE_CLIENT_ID:
@@ -568,10 +741,16 @@ def authorize():
     email = user_info.get('email')
     name = user_info.get('name')
     
-    session['user'] = email
-    
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+    cursor.execute("SELECT banned FROM users WHERE google_email=?", (email,))
+    row_ban = cursor.fetchone()
+    if row_ban and row_ban[0] == 1:
+        conn.close()
+        return render_template_string(HTML_TEMPLATE, active="home", error_message="Ваш аккаунт заблокирован администратором.")
+
+    session['user'] = email
+    
     cursor.execute("INSERT OR IGNORE INTO users (google_email, google_name) VALUES (?, ?)", (email, name))
     conn.commit()
     
@@ -691,13 +870,6 @@ def fines():
     
     cursor.execute("SELECT id, ic_name, amount, reason, status, is_public FROM fines WHERE ic_name=? AND is_public=0", (ic_name,))
     private_fines = cursor.fetchall()
-    
-    if not private_fines:
-        cursor.execute("INSERT INTO fines (ic_name, amount, reason, status, is_public) VALUES (?, ?, ?, ?, ?)", 
-                       (ic_name, 5000, "Превышение скорости на трассе М-1 (Личный)", "Не оплачен", 0))
-        conn.commit()
-        cursor.execute("SELECT id, ic_name, amount, reason, status, is_public FROM fines WHERE ic_name=? AND is_public=0", (ic_name,))
-        private_fines = cursor.fetchall()
         
     conn.close()
     
@@ -750,7 +922,7 @@ def get_current_user_data():
         return None
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT id, google_email, google_name, roblox_nick, ic_name, age, job, registered FROM users WHERE google_email=?", (session['user'],))
+    cursor.execute("SELECT id, google_email, google_name, roblox_nick, ic_name, age, job, registered, banned FROM users WHERE google_email=?", (session['user'],))
     row = cursor.fetchone()
     if row and row[7] == 1:
         session['registered'] = True
