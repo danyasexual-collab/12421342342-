@@ -31,7 +31,7 @@ def save_db(data):
     except Exception:
         pass
 
-# Настройка OAuth (только Google)
+# Настройка OAuth (Google + Discord)
 oauth = OAuth(app)
 
 oauth.register(
@@ -40,6 +40,16 @@ oauth.register(
     client_secret=os.environ.get('GOOGLE_CLIENT_SECRET'),
     server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
     client_kwargs={'scope': 'openid profile email'}
+)
+
+oauth.register(
+    name='discord',
+    client_id=os.environ.get('DISCORD_CLIENT_ID'),
+    client_secret=os.environ.get('DISCORD_CLIENT_SECRET'),
+    access_token_url='https://discord.com/api/oauth2/token',
+    authorize_url='https://discord.com/api/oauth2/authorize',
+    api_base_url='https://discord.com/api/',
+    client_kwargs={'scope': 'identify email'}
 )
 
 HTML_TEMPLATE = """
@@ -55,11 +65,11 @@ HTML_TEMPLATE = """
         .card { background: #1e1e1e; border: 1px solid #333; border-radius: 12px; width: 100%; max-width: 450px; padding: 30px; text-align: center; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
         h1 { font-size: 22px; color: #fff; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px; }
         p.sub { font-size: 13px; color: #888; margin-bottom: 25px; }
-        .user-info { background: #2a2a2a; border-radius: 8px; padding: 15px; margin-bottom: 20px; text-align: left; border-left: 4px solid #00a2ff; }
+        .user-info { background: #2a2a2a; border-radius: 8px; padding: 15px; margin-bottom: 20px; text-align: left; border-left: 4px solid #5865F2; }
         .user-info p { margin: 4px 0; font-size: 14px; color: #bbb; }
         .btn { display: block; width: 100%; padding: 12px; margin: 10px 0; border: none; border-radius: 6px; font-size: 14px; font-weight: bold; cursor: pointer; text-decoration: none; color: white; transition: 0.2s; }
         .btn-google { background-color: #ea4335; }
-        .btn-beta { background-color: #2b2b2b; color: #aaa; cursor: not-allowed; pointer-events: none; border: 1px dashed #5865F2; font-size: 13px; }
+        .btn-discord { background-color: #5865F2; }
         .btn-disabled { background-color: #2b2b2b; color: #777; text-decoration: line-through; cursor: not-allowed; pointer-events: none; border: 1px dashed #444; font-size: 13px; }
         .btn-logout { background-color: #333; border: 1px solid #444; color: #aaa; }
         .footer { margin-top: 20px; font-size: 11px; color: #555; }
@@ -81,7 +91,7 @@ HTML_TEMPLATE = """
         {% else %}
             <p style="margin-bottom: 15px; font-size: 14px;">Авторизуйтесь для доступа:</p>
             <a href="/login/google" class="btn btn-google">Войти через Google</a>
-            <div class="btn btn-beta">Войти через Discord (Beta / В разработке)</div>
+            <a href="/login/discord" class="btn btn-discord">Войти через Discord (Beta)</a>
             <div class="btn btn-disabled">Войти через Roblox (Временно не работает)</div>
         {% endif %}
 
@@ -118,6 +128,32 @@ def auth_google():
             save_db(db)
     except Exception as e:
         print(f"Google auth error: {e}")
+    return redirect('/')
+
+@app.route('/login/discord')
+def login_discord():
+    redirect_uri = 'https://gibdd-russia-rp.vercel.app/auth/discord/callback'
+    return oauth.discord.authorize_redirect(redirect_uri)
+
+@app.route('/auth/discord/callback')
+def auth_discord():
+    try:
+        token = oauth.discord.authorize_access_token()
+        resp = oauth.discord.get('users/@me', token=token)
+        user_info = resp.json()
+        if user_info:
+            user_data = {
+                'name': f"{user_info.get('username')}#{user_info.get('discriminator', '0')}" if user_info.get('discriminator') and user_info.get('discriminator') != '0' else user_info.get('username'),
+                'email': user_info.get('email'),
+                'provider': 'Discord',
+                'sub': user_info.get('id')
+            }
+            session['user'] = user_data
+            db = load_db()
+            db[f"discord_{user_info.get('id')}"] = user_data
+            save_db(db)
+    except Exception as e:
+        print(f"Discord auth error: {e}")
     return redirect('/')
 
 @app.route('/logout')
