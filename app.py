@@ -2,18 +2,24 @@ import os
 import json
 from datetime import datetime
 from flask import Flask, render_template_string, request, jsonify
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
-# JSON files definition
-DATA_FILE = "data.json"
-WANTED_FILE = "wanted.json"
-HISTORY_FILE = "history.json"
-FINES_FILE = "fines.json"
-AUCTION_FILE = "auction.json"
-LOGS_FILE = "logs.json"
+# Исправление для Vercel: запись разрешена только в /tmp
+DATA_DIR = '/tmp' if os.environ.get('VERCEL') else '.'
+
+DATA_FILE = os.path.join(DATA_DIR, "data.json")
+WANTED_FILE = os.path.join(DATA_DIR, "wanted.json")
+HISTORY_FILE = os.path.join(DATA_DIR, "history.json")
+FINES_FILE = os.path.join(DATA_DIR, "fines.json")
+AUCTION_FILE = os.path.join(DATA_DIR, "auction.json")
+LOGS_FILE = os.path.join(DATA_DIR, "logs.json")
 
 def init_db():
+    os.makedirs(DATA_DIR, exist_ok=True)
+    
     if not os.path.exists(DATA_FILE):
         initial_data = {
             "user_plates": {
@@ -22,16 +28,14 @@ def init_db():
                 "user3": ["МММ777", "РРР999"]
             }
         }
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump(initial_data, f, ensure_ascii=False, indent=4)
+        save_json(DATA_FILE, initial_data)
 
     if not os.path.exists(WANTED_FILE):
         initial_wanted = {
             "А777МР777": "Угон",
             "К666АА99": "ДТП со скрытием"
         }
-        with open(WANTED_FILE, "w", encoding="utf-8") as f:
-            json.dump(initial_wanted, f, ensure_ascii=False, indent=4)
+        save_json(WANTED_FILE, initial_wanted)
 
     if not os.path.exists(HISTORY_FILE):
         initial_history = {
@@ -44,8 +48,7 @@ def init_db():
                 {"type": "Нарушение ПДД", "desc": "Парковка в неположенном месте", "date": "2026-08-08 10:00"}
             ]
         }
-        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-            json.dump(initial_history, f, ensure_ascii=False, indent=4)
+        save_json(HISTORY_FILE, initial_history)
 
     if not os.path.exists(FINES_FILE):
         initial_fines = {
@@ -57,8 +60,7 @@ def init_db():
                 {"code": "264.1", "date": "2026-08-08T10:00", "reason": "Проезд на красный"}
             ]
         }
-        with open(FINES_FILE, "w", encoding="utf-8") as f:
-            json.dump(initial_fines, f, ensure_ascii=False, indent=4)
+        save_json(FINES_FILE, initial_fines)
 
     if not os.path.exists(AUCTION_FILE):
         initial_auction = {
@@ -66,28 +68,33 @@ def init_db():
             "price": 1500000,
             "author": "user2"
         }
-        with open(AUCTION_FILE, "w", encoding="utf-8") as f:
-            json.dump(initial_auction, f, ensure_ascii=False, indent=4)
+        save_json(AUCTION_FILE, initial_auction)
 
     if not os.path.exists(LOGS_FILE):
         initial_logs = [
             "2026-08-10 12:00 - Система инициализирована",
             "2026-08-10 12:05 - Загружены начальные данные"
         ]
-        with open(LOGS_FILE, "w", encoding="utf-8") as f:
-            json.dump(initial_logs, f, ensure_ascii=False, indent=4)
+        save_json(LOGS_FILE, initial_logs)
 
 init_db()
 
 def load_json(filepath):
     if os.path.exists(filepath):
-        with open(filepath, "r", encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
     return {}
 
 def save_json(filepath, data):
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
+    try:
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        print(f"Error saving JSON to {filepath}: {e}")
 
 def add_log(msg):
     logs = load_json(LOGS_FILE)
@@ -115,26 +122,22 @@ HTML_TEMPLATE = """
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
         body { background-color: #0d1117; color: #c9d1d9; display: flex; min-height: 100vh; }
         
-        /* Sidebar */
         sidebar { width: 260px; background-color: #161b22; border-right: 1px solid #30363d; display: flex; flex-direction: column; padding: 20px; position: fixed; height: 100vh; }
         .brand { font-size: 16px; font-weight: bold; color: #ffd700; margin-bottom: 30px; text-transform: uppercase; letter-spacing: 1px; }
         .nav-link { display: block; padding: 12px 15px; color: #c9d1d9; text-decoration: none; border-radius: 6px; margin-bottom: 5px; font-size: 14px; transition: 0.2s; cursor: pointer; }
         .nav-link:hover, .nav-link.active { background-color: #30363d; color: #ffd700; }
 
-        /* Main Content */
         .main { margin-left: 260px; flex: 1; padding: 30px; overflow-y: auto; }
         .tab-content { display: none; }
         .tab-content.active { display: block; }
         
         h2 { color: #ffd700; margin-bottom: 20px; font-size: 22px; border-bottom: 1px solid #30363d; padding-bottom: 10px; }
         
-        /* Cards */
         .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 30px; }
         .stat-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; text-align: center; }
         .stat-card h3 { font-size: 28px; color: #ffd700; margin-bottom: 5px; }
         .stat-card p { font-size: 12px; color: #8b949e; text-transform: uppercase; }
 
-        /* Tables */
         table { width: 100%; border-collapse: collapse; background: #161b22; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; margin-top: 15px; }
         th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #30363d; font-size: 14px; }
         th { background: #21262d; color: #8b949e; font-weight: 600; text-transform: uppercase; font-size: 11px; }
@@ -147,7 +150,6 @@ HTML_TEMPLATE = """
         .badge-wanted { background: rgba(218,54,51,0.15); color: #da3633; }
         .badge-fine { background: rgba(218,54,51,0.2); color: #f85149; font-family: monospace; }
 
-        /* Buttons & Inputs */
         .btn { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; padding: 8px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; transition: 0.2s; display: inline-flex; align-items: center; gap: 5px; text-decoration: none; }
         .btn:hover { background: #30363d; border-color: #8b949e; }
         .btn-primary { background: #1f6feb; color: white; border-color: transparent; }
@@ -162,21 +164,18 @@ HTML_TEMPLATE = """
         
         .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; gap: 10px; }
 
-        /* Toast Notifications */
         #toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 1000; display: flex; flex-direction: column; gap: 10px; }
         .toast { padding: 12px 20px; border-radius: 6px; font-size: 13px; color: white; box-shadow: 0 4px 12px rgba(0,0,0,0.5); opacity: 0; transition: opacity 0.3s ease; }
         .toast.show { opacity: 1; }
         .toast-success { background: #238636; }
         .toast-error { background: #da3633; }
 
-        /* Modals */
         .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 500; justify-content: center; align-items: center; }
         .modal.active { display: flex; }
         .modal-box { background: #161b22; border: 1px solid #30363d; border-radius: 8px; width: 400px; padding: 25px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
         .modal-header { font-size: 16px; font-weight: bold; color: #ffd700; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; }
         .modal-close { background: none; border: none; color: #8b949e; font-size: 18px; cursor: pointer; }
 
-        /* Logs stream */
         .logs-box { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 15px; font-family: monospace; font-size: 12px; height: 250px; overflow-y: auto; color: #8b949e; line-height: 1.5; }
 
         @media(max-width: 768px) {
@@ -200,7 +199,6 @@ HTML_TEMPLATE = """
     </sidebar>
 
     <div class="main">
-        <!-- Dashboard Tab -->
         <div id="dashboard" class="tab-content active">
             <h2>Дашборд оперативного управления</h2>
             <div class="stats-grid">
@@ -225,7 +223,6 @@ HTML_TEMPLATE = """
             <div class="logs-box" id="logs-container">Загрузка логов...</div>
         </div>
 
-        <!-- Plates Tab -->
         <div id="plates" class="tab-content">
             <h2>Управление номерами</h2>
             <div class="toolbar">
@@ -252,7 +249,6 @@ HTML_TEMPLATE = """
             </table>
         </div>
 
-        <!-- Users Tab -->
         <div id="users" class="tab-content">
             <h2>Реестр пользователей</h2>
             <table>
@@ -270,7 +266,6 @@ HTML_TEMPLATE = """
             </table>
         </div>
 
-        <!-- Fines Tab -->
         <div id="fines" class="tab-content">
             <h2>База штрафов и нарушений</h2>
             <div style="background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
@@ -298,7 +293,6 @@ HTML_TEMPLATE = """
             </table>
         </div>
 
-        <!-- Auction Tab -->
         <div id="auction" class="tab-content">
             <h2>Аукцион госномеров</h2>
             <div id="auction-container" style="background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 30px; text-align: center; max-width: 500px; margin: 40px auto;">
@@ -306,7 +300,6 @@ HTML_TEMPLATE = """
             </div>
         </div>
 
-        <!-- Dossier Tab -->
         <div id="dossier" class="tab-content">
             <h2>Досье транспортного средства</h2>
             <div class="toolbar" style="max-width: 500px;">
@@ -319,7 +312,6 @@ HTML_TEMPLATE = """
         </div>
     </div>
 
-    <!-- Modals -->
     <div id="modal-give" class="modal">
         <div class="modal-box">
             <div class="modal-header"><span>🎖️ Выдать номер</span><button class="modal-close" onclick="closeModal('modal-give')">&times;</button></div>
@@ -409,7 +401,6 @@ HTML_TEMPLATE = """
             fetch('/api/plates').then(res => res.json()).then(data => {
                 allPlatesCache = data;
                 renderPlatesTable(data);
-                // Also update give user select
                 fetch('/api/users').then(r => r.json()).then(users => {
                     const sel = document.getElementById('give-user-select');
                     sel.innerHTML = users.map(u => `<option value="${u.id}">${u.name}</option>`).join('');
@@ -728,14 +719,12 @@ HTML_TEMPLATE = """
             });
         }
 
-        // Auto-refresh dashboard every 15 seconds
         setInterval(() => {
             if(document.getElementById('dashboard').classList.contains('active')) {
                 loadDashboard();
             }
         }, 15000);
 
-        // Initial load
         loadDashboard();
     </script>
 </body>
@@ -951,7 +940,6 @@ def api_fine_remove():
     
     fines = load_json(FINES_FILE)
     if user_id in fines:
-        original_len = len(fines[user_id])
         fines[user_id] = [f for f in fines[user_id] if f.get("code") != code]
         if len(fines[user_id]) == 0:
             del fines[user_id]
