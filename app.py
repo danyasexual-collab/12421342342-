@@ -6,17 +6,23 @@ from authlib.integrations.flask_client import OAuth
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "gibdd_rf_secret_key_super_secure")
 
-# Настройка OAuth через Authlib
+# Безопасная инициализация OAuth (не упадет, если ключи не заданы)
 oauth = OAuth(app)
-google = oauth.register(
-    name='google',
-    client_id=os.environ.get('GOOGLE_CLIENT_ID'),
-    client_secret=os.environ.get('GOOGLE_CLIENT_SECRET'),
-    server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
-    client_kwargs={
-        'scope': 'openid email profile'
-    }
-)
+google_client_id = os.environ.get('GOOGLE_CLIENT_ID')
+google_client_secret = os.environ.get('GOOGLE_CLIENT_SECRET')
+
+if google_client_id and google_client_secret:
+    google = oauth.register(
+        name='google',
+        client_id=google_client_id,
+        client_secret=google_client_secret,
+        server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
+        client_kwargs={
+            'scope': 'openid email profile'
+        }
+    )
+else:
+    google = None
 
 # Vercel имеет доступ к файловой системе только для чтения, кроме /tmp
 DB_PATH = "/tmp/gibdd.db" if os.environ.get("VERCEL") else "gibdd.db"
@@ -135,6 +141,12 @@ HTML_TEMPLATE = """
         </div>
 
         <div class="md:col-span-3 bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl">
+            {% if error_message %}
+                <div class="bg-red-950/40 border border-red-900 p-4 rounded-lg mb-6 text-red-400 text-sm">
+                    {{ error_message }}
+                </div>
+            {% endif %}
+
             {% if active == 'home' %}
                 <h1 class="text-2xl font-bold mb-4">Официальный портал ФГУП «ГИБДД-РФ»</h1>
                 <p class="text-slate-300 leading-relaxed mb-6">Добро пожаловать в единую информационную систему распределения автомобильных номеров, учета штрафов и контроля транспортной безопасности.</p>
@@ -281,11 +293,15 @@ def index():
 
 @app.route("/login-google")
 def login_google():
+    if not google:
+        return render_template_string(HTML_TEMPLATE, active="home", user_data=None, error_message="Ошибка: Не настроены переменные окружения GOOGLE_CLIENT_ID и GOOGLE_CLIENT_SECRET в панели Vercel.")
     redirect_uri = url_for('authorize', _external=True)
     return google.authorize_redirect(redirect_uri)
 
 @app.route("/authorize")
 def authorize():
+    if not google:
+        return redirect(url_for('index'))
     token = google.authorize_access_token()
     resp = google.get('https://www.googleapis.com/oauth2/v3/userinfo')
     user_info = resp.json()
@@ -428,7 +444,7 @@ def get_current_user_data():
         return None
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT id, google_email, google_name, roblox_nick, ic_name, age, job, registered FROM users WHERE google_email=?", (session['user'],))
+    cursor.execute("SELECT id, google_email, google_name, roblx_nick if 0 else roblox_nick, ic_name, age, job, registered FROM users WHERE google_email=?", (session['user'],))
     row = cursor.fetchone()
     if row and row[7] == 1:
         session['registered'] = True
