@@ -62,37 +62,62 @@ HTML_TEMPLATE = """
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: Arial, sans-serif; background-color: #121212; color: #e0e0e0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
-        .card { background: #1e1e1e; border: 1px solid #333; border-radius: 12px; width: 100%; max-width: 450px; padding: 30px; text-align: center; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
-        h1 { font-size: 22px; color: #fff; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px; }
-        p.sub { font-size: 13px; color: #888; margin-bottom: 25px; }
-        .user-info { background: #2a2a2a; border-radius: 8px; padding: 15px; margin-bottom: 20px; text-align: left; border-left: 4px solid #5865F2; }
-        .user-info p { margin: 4px 0; font-size: 14px; color: #bbb; }
-        .btn { display: block; width: 100%; padding: 12px; margin: 10px 0; border: none; border-radius: 6px; font-size: 14px; font-weight: bold; cursor: pointer; text-decoration: none; color: white; transition: 0.2s; }
+        .card { background: #1e1e1e; border: 1px solid #333; border-radius: 12px; width: 100%; max-width: 650px; padding: 30px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+        .header-flex { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #333; padding-bottom: 15px; }
+        h1 { font-size: 20px; color: #fff; text-transform: uppercase; letter-spacing: 1px; }
+        p.sub { font-size: 12px; color: #888; }
+        .dashboard { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px; }
+        .panel { background: #252525; border: 1px solid #333; border-radius: 8px; padding: 15px; }
+        .panel h3 { font-size: 14px; color: #00a2ff; margin-bottom: 8px; }
+        .panel p { font-size: 13px; color: #aaa; }
+        .user-badge { background: #222; border-left: 4px solid #00a2ff; padding: 12px; border-radius: 6px; margin-bottom: 20px; font-size: 13px; }
+        .user-badge p { margin: 4px 0; color: #ccc; }
+        .user-badge b { color: #fff; }
+        .btn { display: block; width: 100%; padding: 12px; margin: 10px 0; border: none; border-radius: 6px; font-size: 14px; font-weight: bold; cursor: pointer; text-decoration: none; color: white; text-align: center; transition: 0.2s; }
         .btn-google { background-color: #ea4335; }
         .btn-discord { background-color: #5865F2; }
         .btn-disabled { background-color: #2b2b2b; color: #777; text-decoration: line-through; cursor: not-allowed; pointer-events: none; border: 1px dashed #444; font-size: 13px; }
-        .btn-logout { background-color: #333; border: 1px solid #444; color: #aaa; }
-        .footer { margin-top: 20px; font-size: 11px; color: #555; }
+        .btn-logout { background-color: #333; border: 1px solid #444; color: #aaa; width: auto; padding: 8px 16px; margin: 0; font-size: 12px; }
+        .footer { margin-top: 20px; font-size: 11px; color: #555; text-align: center; }
+        .center-box { text-align: center; max-width: 450px; margin: 0 auto; }
     </style>
 </head>
 <body>
     <div class="card">
-        <h1>ФГУП «ГИБДД-РФ»</h1>
-        <p class="sub">Портал авторизации и доступа к базе данных</p>
-
         {% if user %}
-            <div class="user-info">
-                <p><b>Пользователь:</b> {{ user.get('name') }}</p>
+            <div class="header-flex">
+                <div>
+                    <h1>ФГУП «ГИБДД-РФ»</h1>
+                    <p class="sub">Личный кабинет сотрудника</p>
+                </div>
+                <a href="/logout" class="btn btn-logout">Выйти</a>
+            </div>
+
+            <div class="user-badge">
+                <p><b>Сотрудник:</b> {{ user.get('name') }}</p>
                 <p><b>Способ входа:</b> {{ user.get('provider') }}</p>
                 {% if user.get('email') %}<p><b>Email:</b> {{ user.get('email') }}</p>{% endif %}
-                {% if user.get('sub') %}<p><b>ID:</b> {{ user.get('sub') }}</p>{% endif %}
             </div>
-            <a href="/logout" class="btn btn-logout">Выйти из системы</a>
+
+            <div class="dashboard">
+                <div class="panel">
+                    <h3>База данных ТС</h3>
+                    <p>Поиск и проверка зарегистрированных транспортных средств.</p>
+                </div>
+                <div class="panel">
+                    <h3>Патрульные экипажи</h3>
+                    <p>Активные посты, вызовы и оперативная сводка.</p>
+                </div>
+            </div>
         {% else %}
-            <p style="margin-bottom: 15px; font-size: 14px;">Авторизуйтесь для доступа:</p>
-            <a href="/login/google" class="btn btn-google">Войти через Google</a>
-            <a href="/login/discord" class="btn btn-discord">Войти через Discord (Beta)</a>
-            <div class="btn btn-disabled">Войти через Roblox (Временно не работает)</div>
+            <div class="center-box">
+                <h1>ФГУП «ГИБДД-РФ»</h1>
+                <p class="sub" style="margin-bottom: 25px;">Портал авторизации и доступа к базе данных</p>
+                <p style="margin-bottom: 15px; font-size: 14px;">Авторизуйтесь для доступа:</p>
+                <a href="/login/google" class="btn btn-google">Войти через Google</a>
+                <a href="/login/discord" class="btn btn-discord">Войти через Discord</a>
+                <div class="btn btn-disabled">Войти через Roblox (Временно не работает)</div>
+            </div>
         {% endif %}
 
         <div class="footer">ФГУП «ГИБДД-РФ» &copy; 2026. Системный сервер.</div>
